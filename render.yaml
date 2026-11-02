@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: chargebackshield
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /api/mcp/tools
+    envVars:
+      # Leave PAYPAL_MODE unset to run the offline simulator. Set to sandbox_live + credentials for PayPal Sandbox.
+      - key: PAYPAL_MODE
+        sync: false
+      - key: PAYPAL_CLIENT_ID
+        sync: false
+      - key: PAYPAL_CLIENT_SECRET
+        sync: false
+      - key: PAYPAL_WEBHOOK_ID
+        sync: false
+      - key: PAYPAL_ENVIRONMENT
+        value: sandbox

@@ -1,0 +1,12 @@
+node_modules
+.next
+.git
+.agents
+tests
+coverage
+*.db
+*.db-*
+.env*
+tsconfig.tsbuildinfo
+INTERNAL_PROGRESS_AUDIT.md
+PROGRESS_STATUS.md
