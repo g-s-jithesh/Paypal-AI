@@ -50,9 +50,10 @@ export function runGoldenSeeder(): void {
 
     // 2. Insert Default Merchant (ENT-01)
     const merchantId = 'merch_default';
+    const BASE_TIMESTAMP = '2026-11-01T00:00:00.000Z';
     db.prepare(`
-      INSERT INTO merchants (id, name, paypal_client_id, paypal_client_secret, paypal_mode, chargeback_fee_cents, currency)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO merchants (id, name, paypal_client_id, paypal_client_secret, paypal_mode, chargeback_fee_cents, currency, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       merchantId,
       'ChargebackShield Global Merchant',
@@ -60,7 +61,9 @@ export function runGoldenSeeder(): void {
       'sb-secret-mock-67890',
       'SIMULATOR',
       1500,
-      'USD'
+      'USD',
+      BASE_TIMESTAMP,
+      BASE_TIMESTAMP
     );
 
     // 3. Insert Default Policy Rules (ENT-08)
@@ -68,9 +71,9 @@ export function runGoldenSeeder(): void {
       INSERT INTO policy_rules (
         id, merchant_id, max_auto_dispute_cents, max_refund_offer_pct,
         min_win_prob_auto_submit, auto_accept_below_cents, min_win_prob_auto_accept,
-        default_ops_cost_cents, sla_buffer_hours, is_active
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run('pol_default', merchantId, 25000, 0.40, 0.75, 3500, 0.35, 500, 4, 1);
+        default_ops_cost_cents, sla_buffer_hours, is_active, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run('pol_default', merchantId, 25000, 0.40, 0.75, 3500, 0.35, 500, 4, 1, BASE_TIMESTAMP, BASE_TIMESTAMP);
 
     // 4. Products & Catalogs
     const products = [
@@ -97,7 +100,7 @@ export function runGoldenSeeder(): void {
       'Michael Scott', 'Jim Halpert', 'Pam Beesly', 'Dwight Schrute', 'Stanley Hudson'
     ];
 
-    const now = Date.now();
+    const now = new Date(BASE_TIMESTAMP).getTime();
     const dayMs = 86400 * 1000;
 
     // 5. Seed 50 Orders and 50 Disputes

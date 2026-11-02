@@ -13,12 +13,12 @@ PRAGMA synchronous = NORMAL;
 -- Merchant configuration, PayPal Sandbox credentials, and fee baseline
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS merchants (
-  id TEXT PRIMARY KEY,
+  id TEXT PRIMARY KEY NOT NULL,
   name TEXT NOT NULL CHECK (LENGTH(name) > 0),
   paypal_client_id TEXT NULL,
   paypal_client_secret TEXT NULL,
   paypal_mode TEXT NOT NULL DEFAULT 'SIMULATOR' CHECK (paypal_mode IN ('SIMULATOR', 'SANDBOX', 'LIVE')),
-  chargeback_fee_cents INTEGER NOT NULL DEFAULT 1500 CHECK (chargeback_fee_cents >= 0),
+  chargeback_fee_cents INTEGER NOT NULL DEFAULT 1500 CHECK (chargeback_fee_cents >= 0 AND typeof(chargeback_fee_cents) = 'integer'),
   currency TEXT NOT NULL DEFAULT 'USD' CHECK (currency IN ('USD', 'EUR', 'GBP')),
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
   updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
@@ -29,7 +29,7 @@ CREATE TABLE IF NOT EXISTS merchants (
 -- Orders synced from PayPal Orders v2 with carrier tracking checkpoints
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS orders (
-  id TEXT PRIMARY KEY,
+  id TEXT PRIMARY KEY NOT NULL,
   merchant_id TEXT NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
   paypal_order_id TEXT NOT NULL UNIQUE,
   capture_id TEXT NULL,
@@ -42,7 +42,7 @@ CREATE TABLE IF NOT EXISTS orders (
   shipping_postal_code TEXT NULL,
   shipping_country TEXT NOT NULL DEFAULT 'US' CHECK (LENGTH(shipping_country) = 2),
   currency TEXT NOT NULL DEFAULT 'USD',
-  amount_cents INTEGER NOT NULL CHECK (amount_cents > 0),
+  amount_cents INTEGER NOT NULL CHECK (amount_cents > 0 AND typeof(amount_cents) = 'integer'),
   carrier_name TEXT NULL,
   tracking_number TEXT NULL,
   delivery_status TEXT NOT NULL DEFAULT 'UNFULFILLED' CHECK (
@@ -64,7 +64,7 @@ CREATE TABLE IF NOT EXISTS orders (
 -- Core dispute lifecycle tracking status, SLA deadlines, EV track & optimistic lock
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS disputes (
-  id TEXT PRIMARY KEY,
+  id TEXT PRIMARY KEY NOT NULL,
   merchant_id TEXT NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
   order_id TEXT NOT NULL REFERENCES orders(id) ON DELETE RESTRICT,
   paypal_dispute_id TEXT NOT NULL UNIQUE,
@@ -83,7 +83,7 @@ CREATE TABLE IF NOT EXISTS disputes (
       'SUBMITTED', 'WON', 'LOST', 'SETTLED_VIA_REFUND', 'EXPIRED'
     )
   ),
-  dispute_amount_cents INTEGER NOT NULL CHECK (dispute_amount_cents > 0),
+  dispute_amount_cents INTEGER NOT NULL CHECK (dispute_amount_cents > 0 AND typeof(dispute_amount_cents) = 'integer'),
   currency TEXT NOT NULL DEFAULT 'USD',
   buyer_dispute_reason_text TEXT NULL,
   seller_response_due_at TEXT NOT NULL,
@@ -111,7 +111,7 @@ CREATE TABLE IF NOT EXISTS disputes (
 -- Multi-source gathered evidence items verified with SHA-256 digests (BR-008)
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS evidence_items (
-  id TEXT PRIMARY KEY,
+  id TEXT PRIMARY KEY NOT NULL,
   dispute_id TEXT NOT NULL REFERENCES disputes(id) ON DELETE CASCADE,
   order_id TEXT NOT NULL REFERENCES orders(id) ON DELETE RESTRICT,
   evidence_type TEXT NOT NULL CHECK (
@@ -135,11 +135,11 @@ CREATE TABLE IF NOT EXISTS evidence_items (
 -- Append-only audit history of AI Win Probability and Expected Value runs
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS ai_assessments (
-  id TEXT PRIMARY KEY,
+  id TEXT PRIMARY KEY NOT NULL,
   dispute_id TEXT NOT NULL REFERENCES disputes(id) ON DELETE CASCADE,
   win_probability REAL NOT NULL CHECK (win_probability >= 0.0000 AND win_probability <= 1.0000),
-  expected_value_cents INTEGER NOT NULL,
-  ev_settle_cents INTEGER NOT NULL,
+  expected_value_cents INTEGER NOT NULL CHECK (typeof(expected_value_cents) = 'integer'),
+  ev_settle_cents INTEGER NOT NULL CHECK (typeof(ev_settle_cents) = 'integer'),
   recommended_action TEXT NOT NULL CHECK (
     recommended_action IN (
       'AUTO_SUBMIT_EVIDENCE', 'OFFER_PARTIAL_REFUND',
@@ -160,13 +160,13 @@ CREATE TABLE IF NOT EXISTS ai_assessments (
 -- Buyer-facing autonomous AI settlement portal sessions
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS negotiation_sessions (
-  id TEXT PRIMARY KEY,
+  id TEXT PRIMARY KEY NOT NULL,
   dispute_id TEXT NOT NULL UNIQUE REFERENCES disputes(id) ON DELETE CASCADE,
   status TEXT NOT NULL DEFAULT 'ACTIVE' CHECK (
     status IN ('ACTIVE', 'COMPLETED_SETTLED', 'COMPLETED_REJECTED', 'EXPIRED', 'ESCALATED')
   ),
   token_hash TEXT NOT NULL UNIQUE,
-  max_refund_allowed_cents INTEGER NOT NULL CHECK (max_refund_allowed_cents >= 0),
+  max_refund_allowed_cents INTEGER NOT NULL CHECK (max_refund_allowed_cents >= 0 AND typeof(max_refund_allowed_cents) = 'integer'),
   messages_json TEXT NOT NULL DEFAULT '[]',
   guardrail_triggered_count INTEGER NOT NULL DEFAULT 0 CHECK (guardrail_triggered_count >= 0),
   last_buyer_activity_at TEXT NULL,
@@ -179,14 +179,14 @@ CREATE TABLE IF NOT EXISTS negotiation_sessions (
 -- Formal settlement offers (e.g. PayPal make-offer partial refunds) (BR-004)
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS settlement_offers (
-  id TEXT PRIMARY KEY,
+  id TEXT PRIMARY KEY NOT NULL,
   dispute_id TEXT NOT NULL REFERENCES disputes(id) ON DELETE CASCADE,
   negotiation_session_id TEXT NOT NULL REFERENCES negotiation_sessions(id) ON DELETE CASCADE,
   offer_type TEXT NOT NULL DEFAULT 'PARTIAL_REFUND' CHECK (
     offer_type IN ('PARTIAL_REFUND', 'REPLACEMENT', 'STORE_CREDIT')
   ),
-  offered_amount_cents INTEGER NOT NULL CHECK (offered_amount_cents > 0),
-  max_allowed_cents INTEGER NOT NULL CHECK (max_allowed_cents >= offered_amount_cents),
+  offered_amount_cents INTEGER NOT NULL CHECK (offered_amount_cents > 0 AND typeof(offered_amount_cents) = 'integer'),
+  max_allowed_cents INTEGER NOT NULL CHECK (max_allowed_cents >= offered_amount_cents AND typeof(max_allowed_cents) = 'integer'),
   status TEXT NOT NULL DEFAULT 'PROPOSED' CHECK (
     status IN ('PROPOSED', 'ACCEPTED', 'REJECTED', 'EXECUTED', 'CANCELLED')
   ),
@@ -205,20 +205,20 @@ CREATE TABLE IF NOT EXISTS settlement_offers (
 -- Merchant policy configuration governing automated thresholds & refund caps
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS policy_rules (
-  id TEXT PRIMARY KEY,
+  id TEXT PRIMARY KEY NOT NULL,
   merchant_id TEXT NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
-  max_auto_dispute_cents INTEGER NOT NULL DEFAULT 25000 CHECK (max_auto_dispute_cents >= 0),
+  max_auto_dispute_cents INTEGER NOT NULL DEFAULT 25000 CHECK (max_auto_dispute_cents >= 0 AND typeof(max_auto_dispute_cents) = 'integer'),
   max_refund_offer_pct REAL NOT NULL DEFAULT 0.40 CHECK (
     max_refund_offer_pct >= 0.0 AND max_refund_offer_pct <= 1.0
   ),
   min_win_prob_auto_submit REAL NOT NULL DEFAULT 0.75 CHECK (
     min_win_prob_auto_submit >= 0.0 AND min_win_prob_auto_submit <= 1.0
   ),
-  auto_accept_below_cents INTEGER NOT NULL DEFAULT 3500 CHECK (auto_accept_below_cents >= 0),
+  auto_accept_below_cents INTEGER NOT NULL DEFAULT 3500 CHECK (auto_accept_below_cents >= 0 AND typeof(auto_accept_below_cents) = 'integer'),
   min_win_prob_auto_accept REAL NOT NULL DEFAULT 0.35 CHECK (
     min_win_prob_auto_accept >= 0.0 AND min_win_prob_auto_accept <= 1.0
   ),
-  default_ops_cost_cents INTEGER NOT NULL DEFAULT 500 CHECK (default_ops_cost_cents >= 0),
+  default_ops_cost_cents INTEGER NOT NULL DEFAULT 500 CHECK (default_ops_cost_cents >= 0 AND typeof(default_ops_cost_cents) = 'integer'),
   sla_buffer_hours INTEGER NOT NULL DEFAULT 4 CHECK (sla_buffer_hours >= 1),
   is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0, 1)),
   version INTEGER NOT NULL DEFAULT 1 CHECK (version >= 1),
@@ -231,7 +231,7 @@ CREATE TABLE IF NOT EXISTS policy_rules (
 -- Append-only tamper-evident audit ledger for all mutations & tool calls
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS audit_logs (
-  id TEXT PRIMARY KEY,
+  id TEXT PRIMARY KEY NOT NULL,
   merchant_id TEXT NOT NULL,
   entity_type TEXT NOT NULL,
   entity_id TEXT NOT NULL,
@@ -253,7 +253,7 @@ CREATE TABLE IF NOT EXISTS audit_logs (
 -- Raw PayPal webhook ledger for deduplication, payload retention, and replay
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS webhook_events (
-  id TEXT PRIMARY KEY,
+  id TEXT PRIMARY KEY NOT NULL,
   webhook_id TEXT NOT NULL UNIQUE,
   event_type TEXT NOT NULL,
   resource_id TEXT NOT NULL,
@@ -292,16 +292,23 @@ BEGIN
   END;
 END;
 
+CREATE TRIGGER IF NOT EXISTS trg_orders_check_dispute_amount_update
+BEFORE UPDATE OF amount_cents ON orders
+FOR EACH ROW
+BEGIN
+  SELECT CASE
+    WHEN NEW.amount_cents < (SELECT COALESCE(MAX(dispute_amount_cents), 0) FROM disputes WHERE order_id = OLD.id)
+    THEN RAISE(ABORT, 'BR-001: order amount_cents cannot be reduced below existing dispute_amount_cents')
+  END;
+END;
+
 -- BR-005: Dispute in terminal state (WON, LOST, SETTLED_VIA_REFUND, EXPIRED) is immutable
 CREATE TRIGGER IF NOT EXISTS trg_disputes_immutable_terminal_states
 BEFORE UPDATE ON disputes
 FOR EACH ROW
 WHEN OLD.status IN ('WON', 'LOST', 'SETTLED_VIA_REFUND', 'EXPIRED')
 BEGIN
-  SELECT CASE
-    WHEN NEW.status != OLD.status
-    THEN RAISE(ABORT, 'BR-005: Cannot modify dispute in terminal state (WON, LOST, SETTLED_VIA_REFUND, EXPIRED)')
-  END;
+  SELECT RAISE(ABORT, 'BR-005: Cannot modify dispute in terminal state (WON, LOST, SETTLED_VIA_REFUND, EXPIRED)');
 END;
 
 -- BR-012 & ENT-09: audit_logs is strictly append-only (No UPDATE, No DELETE)

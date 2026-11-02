@@ -28,12 +28,12 @@ Merchant configuration, PayPal Sandbox credentials, and fee baseline.
 
 | Column Name | Type | Nullable | Default | Constraints / Checks | FK Reference | PII Tag | Business Meaning & Example |
 | :--- | :--- | :---: | :--- | :--- | :--- | :---: | :--- |
-| `id` | `TEXT` | NO | — | `PRIMARY KEY` | — | `INTERNAL` | Unique merchant identifier (`'merch_default'`) |
+| `id` | `TEXT` | NO | — | `PRIMARY KEY NOT NULL` | — | `INTERNAL` | Unique merchant identifier (`'merch_default'`) |
 | `name` | `TEXT` | NO | — | `CHECK (LENGTH(name) > 0)` | — | `INTERNAL` | Registered merchant store name |
 | `paypal_client_id` | `TEXT` | YES | `NULL` | — | — | `RESTRICTED` | PayPal REST Client ID |
 | `paypal_client_secret` | `TEXT` | YES | `NULL` | — | — | `RESTRICTED` | PayPal REST Secret (Never logged) |
 | `paypal_mode` | `TEXT` | NO | `'SIMULATOR'` | `CHECK (IN ('SIMULATOR','SANDBOX','LIVE'))` | — | `INTERNAL` | Engine execution mode flag |
-| `chargeback_fee_cents` | `INTEGER` | NO | `1500` | `CHECK (chargeback_fee_cents >= 0)` | — | `INTERNAL` | Bank dispute penalty fee (1500 = $15.00) |
+| `chargeback_fee_cents` | `INTEGER` | NO | `1500` | `CHECK (chargeback_fee_cents >= 0 AND typeof(chargeback_fee_cents) = 'integer')` | — | `INTERNAL` | Bank dispute penalty fee (1500 = $15.00) |
 | `currency` | `TEXT` | NO | `'USD'` | `CHECK (IN ('USD','EUR','GBP'))` | — | `INTERNAL` | Default account currency |
 | `created_at` | `TEXT` | NO | `CURRENT_TIMESTAMP` | ISO-8601 UTC | — | `INTERNAL` | Record creation timestamp |
 | `updated_at` | `TEXT` | NO | `CURRENT_TIMESTAMP` | ISO-8601 UTC | — | `INTERNAL` | Record modification timestamp |
@@ -45,7 +45,7 @@ Orders synced from PayPal Orders v2 with carrier tracking checkpoints.
 
 | Column Name | Type | Nullable | Default | Constraints / Checks | FK Reference | PII Tag | Business Meaning & Example |
 | :--- | :--- | :---: | :--- | :--- | :--- | :---: | :--- |
-| `id` | `TEXT` | NO | — | `PRIMARY KEY` | — | `INTERNAL` | Internal order ID (`'ORD-GOLD-001'`) |
+| `id` | `TEXT` | NO | — | `PRIMARY KEY NOT NULL` | — | `INTERNAL` | Internal order ID (`'ORD-GOLD-001'`) |
 | `merchant_id` | `TEXT` | NO | — | `REFERENCES merchants(id)` | `merchants(id)` | `INTERNAL` | Associated merchant identifier |
 | `paypal_order_id` | `TEXT` | NO | — | `UNIQUE` | — | `INTERNAL` | PayPal Order v2 ID (`'O-991001'`) |
 | `capture_id` | `TEXT` | YES | `NULL` | — | — | `INTERNAL` | PayPal Capture transaction ID |
@@ -58,7 +58,7 @@ Orders synced from PayPal Orders v2 with carrier tracking checkpoints.
 | `shipping_postal_code` | `TEXT` | YES | `NULL` | — | — | `INTERNAL` | Postal / ZIP code |
 | `shipping_country` | `TEXT` | NO | `'US'` | `LENGTH(shipping_country) = 2` | — | `INTERNAL` | ISO 3166-1 alpha-2 country |
 | `currency` | `TEXT` | NO | `'USD'` | — | — | `INTERNAL` | Order currency |
-| `amount_cents` | `INTEGER` | NO | — | `CHECK (amount_cents > 0)` | — | `INTERNAL` | Captured total amount in cents (14500 = $145.00) |
+| `amount_cents` | `INTEGER` | NO | — | `CHECK (amount_cents > 0 AND typeof(amount_cents) = 'integer')` | — | `INTERNAL` | Captured total amount in cents (14500 = $145.00) |
 | `carrier_name` | `TEXT` | YES | `NULL` | — | — | `INTERNAL` | Shipping carrier (`'UPS'`, `'FedEx'`, `'USPS'`) |
 | `tracking_number` | `TEXT` | YES | `NULL` | — | — | `INTERNAL` | Carrier tracking number |
 | `delivery_status` | `TEXT` | NO | `'UNFULFILLED'` | `CHECK (IN ('UNFULFILLED','SHIPPED','IN_TRANSIT','OUT_FOR_DELIVERY','DELIVERED','RETURNED_TO_SENDER','LOST_IN_TRANSIT'))` | — | `INTERNAL` | Carrier milestone checkpoint |
@@ -76,13 +76,13 @@ Core dispute lifecycle tracking status, SLA deadlines, EV track & optimistic loc
 
 | Column Name | Type | Nullable | Default | Constraints / Checks | FK Reference | PII Tag | Business Meaning & Example |
 | :--- | :--- | :---: | :--- | :--- | :--- | :---: | :--- |
-| `id` | `TEXT` | NO | — | `PRIMARY KEY` | — | `PUBLIC` | Dispute identifier (`'DSP-GOLD-001'`) |
+| `id` | `TEXT` | NO | — | `PRIMARY KEY NOT NULL` | — | `PUBLIC` | Dispute identifier (`'DSP-GOLD-001'`) |
 | `merchant_id` | `TEXT` | NO | — | `REFERENCES merchants(id)` | `merchants(id)` | `INTERNAL` | Associated merchant identifier |
 | `order_id` | `TEXT` | NO | — | `REFERENCES orders(id)` | `orders(id)` | `INTERNAL` | Disputed order identifier |
 | `paypal_dispute_id` | `TEXT` | NO | — | `UNIQUE` | — | `PUBLIC` | PayPal Dispute ID (`'PP-D-881001'`) |
 | `reason_code` | `TEXT` | NO | — | `CHECK (IN ('MERCHANDISE_OR_SERVICE_NOT_RECEIVED','SIGNIFICANTLY_NOT_AS_DESCRIBED','UNAUTHORISED','CANCELLED_RECURRING_BILLING','OTHER'))` | — | `PUBLIC` | Category of dispute (`BR-025`) |
 | `status` | `TEXT` | NO | `'OPEN'` | `CHECK (IN ('OPEN','EVIDENCE_GATHERING','NEGOTIATING','READY_FOR_REVIEW','SUBMITTED','WON','LOST','SETTLED_VIA_REFUND','EXPIRED'))` | — | `PUBLIC` | State Machine Status (`BR-005`) |
-| `dispute_amount_cents` | `INTEGER` | NO | — | `CHECK (dispute_amount_cents > 0)` | — | `INTERNAL` | Amount disputed in cents (`BR-001`) |
+| `dispute_amount_cents` | `INTEGER` | NO | — | `CHECK (dispute_amount_cents > 0 AND typeof(dispute_amount_cents) = 'integer')` | — | `INTERNAL` | Amount disputed in cents (`BR-001`) |
 | `currency` | `TEXT` | NO | `'USD'` | — | — | `INTERNAL` | Dispute currency |
 | `buyer_dispute_reason_text` | `TEXT` | YES | `NULL` | — | — | `INTERNAL` | Customer dispute explanation |
 | `seller_response_due_at` | `TEXT` | NO | — | `CHECK (> created_at)` | — | `INTERNAL` | PayPal response SLA deadline (`BR-002`) |
@@ -101,7 +101,7 @@ Multi-source gathered evidence items verified with SHA-256 digests (`BR-008`).
 
 | Column Name | Type | Nullable | Default | Constraints / Checks | FK Reference | PII Tag | Business Meaning & Example |
 | :--- | :--- | :---: | :--- | :--- | :--- | :---: | :--- |
-| `id` | `TEXT` | NO | — | `PRIMARY KEY` | — | `INTERNAL` | Evidence item ID (`'evi_gold_001_1'`) |
+| `id` | `TEXT` | NO | — | `PRIMARY KEY NOT NULL` | — | `INTERNAL` | Evidence item ID (`'evi_gold_001_1'`) |
 | `dispute_id` | `TEXT` | NO | — | `REFERENCES disputes(id)` | `disputes(id)` | `INTERNAL` | Parent dispute ID |
 | `order_id` | `TEXT` | NO | — | `REFERENCES orders(id)` | `orders(id)` | `INTERNAL` | Associated order ID |
 | `evidence_type` | `TEXT` | NO | — | `CHECK (IN ('TRACKING_PROOF','DELIVERY_SIGNATURE','ORDER_RECEIPT','USAGE_LOG','CUSTOMER_COMMS','REFUND_POLICY','ITEM_DESCRIPTION','ACCESS_LOGS'))` | — | `INTERNAL` | Evidence classification |
@@ -120,11 +120,11 @@ Append-only audit history of AI Win Probability and Expected Value runs.
 
 | Column Name | Type | Nullable | Default | Constraints / Checks | FK Reference | PII Tag | Business Meaning & Example |
 | :--- | :--- | :---: | :--- | :--- | :--- | :---: | :--- |
-| `id` | `TEXT` | NO | — | `PRIMARY KEY` | — | `INTERNAL` | Assessment run ID |
+| `id` | `TEXT` | NO | — | `PRIMARY KEY NOT NULL` | — | `INTERNAL` | Assessment run ID |
 | `dispute_id` | `TEXT` | NO | — | `REFERENCES disputes(id)` | `disputes(id)` | `INTERNAL` | Evaluated dispute |
 | `win_probability` | `REAL` | NO | — | `CHECK (>= 0.0000 AND <= 1.0000)` | — | `INTERNAL` | Win Probability score $W$ (`BR-003`) |
-| `expected_value_cents` | `INTEGER` | NO | — | — | — | `INTERNAL` | Expected Value of fighting in cents (`BR-007`) |
-| `ev_settle_cents` | `INTEGER` | NO | — | — | — | `INTERNAL` | Expected Value of settling in cents (`BR-007`) |
+| `expected_value_cents` | `INTEGER` | NO | — | `CHECK (typeof(expected_value_cents) = 'integer')` | — | `INTERNAL` | Expected Value of fighting in cents (`BR-007`) |
+| `ev_settle_cents` | `INTEGER` | NO | — | `CHECK (typeof(ev_settle_cents) = 'integer')` | — | `INTERNAL` | Expected Value of settling in cents (`BR-007`) |
 | `recommended_action` | `TEXT` | NO | — | `CHECK (IN ('AUTO_SUBMIT_EVIDENCE','OFFER_PARTIAL_REFUND','AUTO_ACCEPT_CLAIM','ESCALATE_TO_HUMAN'))` | — | `INTERNAL` | Recommended routing action |
 | `confidence_score` | `REAL` | NO | — | `CHECK (>= 0.00 AND <= 1.00)` | — | `INTERNAL` | Model certainty metric |
 | `reasoning_json` | `TEXT` | NO | — | — | — | `INTERNAL` | Structured factors and weights |
@@ -141,11 +141,11 @@ Buyer-facing autonomous AI settlement portal sessions.
 
 | Column Name | Type | Nullable | Default | Constraints / Checks | FK Reference | PII Tag | Business Meaning & Example |
 | :--- | :--- | :---: | :--- | :--- | :--- | :---: | :--- |
-| `id` | `TEXT` | NO | — | `PRIMARY KEY` | — | `INTERNAL` | Session ID (`'neg_gold_002'`) |
+| `id` | `TEXT` | NO | — | `PRIMARY KEY NOT NULL` | — | `INTERNAL` | Session ID (`'neg_gold_002'`) |
 | `dispute_id` | `TEXT` | NO | — | `UNIQUE, REFERENCES disputes(id)` | `disputes(id)` | `INTERNAL` | 1-to-1 link to dispute |
 | `status` | `TEXT` | NO | `'ACTIVE'` | `CHECK (IN ('ACTIVE','COMPLETED_SETTLED','COMPLETED_REJECTED','EXPIRED','ESCALATED'))` | — | `INTERNAL` | Session lifecycle state |
 | `token_hash` | `TEXT` | NO | — | `UNIQUE` | — | `RESTRICTED` | SHA-256 access token hash (`BR-019`) |
-| `max_refund_allowed_cents` | `INTEGER` | NO | — | `CHECK (>= 0)` | — | `INTERNAL` | Strict policy refund cap in cents (`BR-004`) |
+| `max_refund_allowed_cents` | `INTEGER` | NO | — | `CHECK (max_refund_allowed_cents >= 0 AND typeof(max_refund_allowed_cents) = 'integer')` | — | `INTERNAL` | Strict policy refund cap in cents (`BR-004`) |
 | `messages_json` | `TEXT` | NO | `'[]'` | — | — | `CONFIDENTIAL/PII` | Array of chat turns with guardrail status |
 | `guardrail_triggered_count` | `INTEGER` | NO | `0` | `CHECK (>= 0)` | — | `INTERNAL` | Count of prompt injection / cap blocks |
 | `last_buyer_activity_at` | `TEXT` | YES | `NULL` | ISO-8601 UTC | — | `INTERNAL` | Buyer interaction timestamp |
@@ -159,12 +159,12 @@ Formal settlement offers (e.g. PayPal make-offer partial refunds) (`BR-004`).
 
 | Column Name | Type | Nullable | Default | Constraints / Checks | FK Reference | PII Tag | Business Meaning & Example |
 | :--- | :--- | :---: | :--- | :--- | :--- | :---: | :--- |
-| `id` | `TEXT` | NO | — | `PRIMARY KEY` | — | `INTERNAL` | Offer ID (`'off_gold_003'`) |
+| `id` | `TEXT` | NO | — | `PRIMARY KEY NOT NULL` | — | `INTERNAL` | Offer ID (`'off_gold_003'`) |
 | `dispute_id` | `TEXT` | NO | — | `REFERENCES disputes(id)` | `disputes(id)` | `INTERNAL` | Target dispute ID |
 | `negotiation_session_id` | `TEXT` | NO | — | `REFERENCES negotiation_sessions(id)` | `negotiation_sessions(id)` | `INTERNAL` | Chat session reference |
 | `offer_type` | `TEXT` | NO | `'PARTIAL_REFUND'` | `CHECK (IN ('PARTIAL_REFUND','REPLACEMENT','STORE_CREDIT'))` | — | `INTERNAL` | Offer modality |
-| `offered_amount_cents` | `INTEGER` | NO | — | `CHECK (offered_amount_cents > 0)` | — | `INTERNAL` | Proposed refund in cents (4200 = $42.00) |
-| `max_allowed_cents` | `INTEGER` | NO | — | `CHECK (max_allowed_cents >= offered_amount_cents)` | — | `INTERNAL` | Policy ceiling at offer creation time |
+| `offered_amount_cents` | `INTEGER` | NO | — | `CHECK (offered_amount_cents > 0 AND typeof(offered_amount_cents) = 'integer')` | — | `INTERNAL` | Proposed refund in cents (4200 = $42.00) |
+| `max_allowed_cents` | `INTEGER` | NO | — | `CHECK (max_allowed_cents >= offered_amount_cents AND typeof(max_allowed_cents) = 'integer')` | — | `INTERNAL` | Policy ceiling at offer creation time |
 | `status` | `TEXT` | NO | `'PROPOSED'` | `CHECK (IN ('PROPOSED','ACCEPTED','REJECTED','EXECUTED','CANCELLED'))` | — | `INTERNAL` | Offer state (`BR-018`) |
 | `paypal_offer_id` | `TEXT` | YES | `NULL` | — | — | `INTERNAL` | PayPal API offer identifier |
 | `proposed_by` | `TEXT` | NO | — | `CHECK (IN ('AGENT','BUYER','ANALYST'))` | — | `INTERNAL` | Actor who formulated offer |
@@ -181,14 +181,14 @@ Merchant policy configuration governing automated thresholds & refund caps.
 
 | Column Name | Type | Nullable | Default | Constraints / Checks | FK Reference | PII Tag | Business Meaning & Example |
 | :--- | :--- | :---: | :--- | :--- | :--- | :---: | :--- |
-| `id` | `TEXT` | NO | — | `PRIMARY KEY` | — | `INTERNAL` | Policy configuration ID (`'pol_default'`) |
+| `id` | `TEXT` | NO | — | `PRIMARY KEY NOT NULL` | — | `INTERNAL` | Policy configuration ID (`'pol_default'`) |
 | `merchant_id` | `TEXT` | NO | — | `REFERENCES merchants(id)` | `merchants(id)` | `INTERNAL` | Merchant account |
-| `max_auto_dispute_cents` | `INTEGER` | NO | `25000` | `CHECK (>= 0)` | — | `INTERNAL` | Human approval gate threshold ($250.00) (`BR-006`) |
+| `max_auto_dispute_cents` | `INTEGER` | NO | `25000` | `CHECK (max_auto_dispute_cents >= 0 AND typeof(max_auto_dispute_cents) = 'integer')` | — | `INTERNAL` | Human approval gate threshold ($250.00) (`BR-006`) |
 | `max_refund_offer_pct` | `REAL` | NO | `0.40` | `CHECK (>= 0.0 AND <= 1.0)` | — | `INTERNAL` | Maximum partial refund cap fraction (0.40 = 40%) (`BR-004`) |
 | `min_win_prob_auto_submit` | `REAL` | NO | `0.75` | `CHECK (>= 0.0 AND <= 1.0)` | — | `INTERNAL` | Track A auto-submit threshold (0.75) |
-| `auto_accept_below_cents` | `INTEGER` | NO | `3500` | `CHECK (>= 0)` | — | `INTERNAL` | Track C auto-accept ceiling ($35.00) (`BR-017`) |
+| `auto_accept_below_cents` | `INTEGER` | NO | `3500` | `CHECK (auto_accept_below_cents >= 0 AND typeof(auto_accept_below_cents) = 'integer')` | — | `INTERNAL` | Track C auto-accept ceiling ($35.00) (`BR-017`) |
 | `min_win_prob_auto_accept` | `REAL` | NO | `0.35` | `CHECK (>= 0.0 AND <= 1.0)` | — | `INTERNAL` | Low win-rate bar for auto-accept |
-| `default_ops_cost_cents` | `INTEGER` | NO | `500` | `CHECK (>= 0)` | — | `INTERNAL` | Operational review cost ($5.00) (`BR-007`) |
+| `default_ops_cost_cents` | `INTEGER` | NO | `500` | `CHECK (default_ops_cost_cents >= 0 AND typeof(default_ops_cost_cents) = 'integer')` | — | `INTERNAL` | Operational review cost ($5.00) (`BR-007`) |
 | `sla_buffer_hours` | `INTEGER` | NO | `4` | `CHECK (>= 1)` | — | `INTERNAL` | Emergency fallback window in hours (`BR-010`) |
 | `is_active` | `INTEGER` | NO | `1` | `CHECK (IN (0, 1))` | — | `INTERNAL` | Active configuration flag |
 | `version` | `INTEGER` | NO | `1` | `CHECK (version >= 1)` | — | `INTERNAL` | Policy version counter |
@@ -202,7 +202,7 @@ Append-only tamper-evident audit ledger for all mutations & tool calls (`BR-012`
 
 | Column Name | Type | Nullable | Default | Constraints / Checks | FK Reference | PII Tag | Business Meaning & Example |
 | :--- | :--- | :---: | :--- | :--- | :--- | :---: | :--- |
-| `id` | `TEXT` | NO | — | `PRIMARY KEY` | — | `INTERNAL` | Audit entry UUID |
+| `id` | `TEXT` | NO | — | `PRIMARY KEY NOT NULL` | — | `INTERNAL` | Audit entry UUID |
 | `merchant_id` | `TEXT` | NO | — | — | — | `INTERNAL` | Associated merchant identifier |
 | `entity_type` | `TEXT` | NO | — | — | — | `INTERNAL` | Mutated table name (`'disputes'`, `'settlement_offers'`) |
 | `entity_id` | `TEXT` | NO | — | — | — | `INTERNAL` | Primary key of mutated record |
@@ -223,7 +223,7 @@ Raw PayPal webhook ledger for deduplication, payload retention, and replay (`BR-
 
 | Column Name | Type | Nullable | Default | Constraints / Checks | FK Reference | PII Tag | Business Meaning & Example |
 | :--- | :--- | :---: | :--- | :--- | :--- | :---: | :--- |
-| `id` | `TEXT` | NO | — | `PRIMARY KEY` | — | `INTERNAL` | Ingestion record UUID |
+| `id` | `TEXT` | NO | — | `PRIMARY KEY NOT NULL` | — | `INTERNAL` | Ingestion record UUID |
 | `webhook_id` | `TEXT` | NO | — | `UNIQUE` | — | `PUBLIC` | PayPal Transmission ID (`WH-XXXXX`) (`BR-011`) |
 | `event_type` | `TEXT` | NO | — | — | — | `PUBLIC` | Event type (`'CUSTOMER.DISPUTE.CREATED'`) |
 | `resource_id` | `TEXT` | NO | — | — | — | `PUBLIC` | Target PayPal Dispute ID |
@@ -240,9 +240,11 @@ Raw PayPal webhook ledger for deduplication, payload retention, and replay (`BR-
 
 1. **`trg_disputes_check_order_amount_insert` & `update` (`BR-001`):**  
    Ensures `NEW.dispute_amount_cents <= (SELECT amount_cents FROM orders WHERE id = NEW.order_id)`. Rejects insertion or update exceeding the original captured transaction amount.
-2. **`trg_disputes_immutable_terminal_states` (`BR-005`):**  
-   Prevents any dispute in a terminal state (`'WON'`, `'LOST'`, `'SETTLED_VIA_REFUND'`, `'EXPIRED'`) from altering its status.
-3. **`trg_audit_logs_no_update` & `no_delete` (`BR-012`):**  
+2. **`trg_orders_check_dispute_amount_update` (`BR-001`):**  
+   Ensures `NEW.amount_cents >= (SELECT COALESCE(MAX(dispute_amount_cents), 0) FROM disputes WHERE order_id = OLD.id)`. Rejects lowering an order's captured amount below any active or recorded dispute amount.
+3. **`trg_disputes_immutable_terminal_states` (`BR-005`):**  
+   Strictly enforces that any dispute in a terminal state (`'WON'`, `'LOST'`, `'SETTLED_VIA_REFUND'`, `'EXPIRED'`) is 100% immutable: any attempt to modify status or any other column throws an abort signal.
+4. **`trg_audit_logs_no_update` & `no_delete` (`BR-012`):**  
    Strictly enforces append-only immutability for `audit_logs`. Any attempt to update or delete rows throws an abort signal.
 
 ---

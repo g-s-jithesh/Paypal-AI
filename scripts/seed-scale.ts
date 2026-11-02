@@ -9,20 +9,21 @@ export function runScaleSeeder(totalDisputes: number = 5000): void {
   const startTime = Date.now();
 
   const merchantId = 'merch_default';
+  const BASE_TIMESTAMP = '2026-11-01T00:00:00.000Z';
 
   // Ensure default merchant and policies exist
   db.prepare(`
-    INSERT OR IGNORE INTO merchants (id, name, paypal_mode, chargeback_fee_cents, currency)
-    VALUES (?, ?, ?, ?, ?)
-  `).run(merchantId, 'ChargebackShield Scale Test Store', 'SIMULATOR', 1500, 'USD');
+    INSERT OR IGNORE INTO merchants (id, name, paypal_mode, chargeback_fee_cents, currency, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `).run(merchantId, 'ChargebackShield Scale Test Store', 'SIMULATOR', 1500, 'USD', BASE_TIMESTAMP, BASE_TIMESTAMP);
 
   db.prepare(`
     INSERT OR IGNORE INTO policy_rules (
       id, merchant_id, max_auto_dispute_cents, max_refund_offer_pct,
       min_win_prob_auto_submit, auto_accept_below_cents, min_win_prob_auto_accept,
-      default_ops_cost_cents, sla_buffer_hours, is_active
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run('pol_default', merchantId, 25000, 0.40, 0.75, 3500, 0.35, 500, 4, 1);
+      default_ops_cost_cents, sla_buffer_hours, is_active, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run('pol_default', merchantId, 25000, 0.40, 0.75, 3500, 0.35, 500, 4, 1, BASE_TIMESTAMP, BASE_TIMESTAMP);
 
   // Prepared insert statements
   const insertOrder = db.prepare(`
@@ -65,7 +66,7 @@ export function runScaleSeeder(totalDisputes: number = 5000): void {
   `);
 
   const chunkSize = 500;
-  const now = Date.now();
+  const now = new Date(BASE_TIMESTAMP).getTime();
   const dayMs = 86400 * 1000;
 
   for (let batchStart = 1; batchStart <= totalDisputes; batchStart += chunkSize) {
