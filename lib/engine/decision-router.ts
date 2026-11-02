@@ -284,100 +284,102 @@ export function persistDecisionResult(db: Database, params: PersistDecisionParam
     ipAddress = '127.0.0.1',
   } = params;
 
-  // 1. Fetch current dispute record
-  const current = db.prepare(`
-    SELECT id, merchant_id, status, track, version
-    FROM disputes
-    WHERE id = ? OR paypal_dispute_id = ?
-  `).get(disputeId, disputeId) as { id: string; merchant_id: string; status: string; track: string | null; version: number } | undefined;
+  return db.transaction(() => {
+    // 1. Fetch current dispute record
+    const current = db.prepare(`
+      SELECT id, merchant_id, status, track, version
+      FROM disputes
+      WHERE id = ? OR paypal_dispute_id = ?
+    `).get(disputeId, disputeId) as { id: string; merchant_id: string; status: string; track: string | null; version: number } | undefined;
 
-  if (!current) {
-    throw new Error(`Dispute not found: ${disputeId}`);
-  }
+    if (!current) {
+      throw new Error(`Dispute not found: ${disputeId}`);
+    }
 
-  // BR-005: Terminal state immutability
-  if (TERMINAL_STATUSES.includes(current.status)) {
-    throw new Error(`BR-005: Cannot modify dispute ${current.id} in terminal state '${current.status}'`);
-  }
+    // BR-005: Terminal state immutability
+    if (TERMINAL_STATUSES.includes(current.status)) {
+      throw new Error(`BR-005: Cannot modify dispute ${current.id} in terminal state '${current.status}'`);
+    }
 
-  const expectedVersion = params.expectedVersion ?? current.version;
-  const merchantId = params.merchantId ?? current.merchant_id;
-  const isSubmission = decision.action === 'AUTO_SUBMIT_EVIDENCE';
-  const isTerminal = ['SETTLED_VIA_REFUND', 'WON', 'LOST', 'EXPIRED'].includes(decision.nextStatus);
+    const expectedVersion = params.expectedVersion ?? current.version;
+    const merchantId = params.merchantId ?? current.merchant_id;
+    const isSubmission = decision.action === 'AUTO_SUBMIT_EVIDENCE';
+    const isTerminal = ['SETTLED_VIA_REFUND', 'WON', 'LOST', 'EXPIRED'].includes(decision.nextStatus);
 
-  // 2. Update disputes table with optimistic lock (BR-015)
-  const updateStmt = db.prepare(`
-    UPDATE disputes
-    SET status = ?,
-        track = ?,
-        submitted_at = CASE WHEN ? = 1 THEN strftime('%Y-%m-%dT%H:%M:%fZ', 'now') ELSE submitted_at END,
-        resolved_at = CASE WHEN ? = 1 THEN strftime('%Y-%m-%dT%H:%M:%fZ', 'now') ELSE resolved_at END,
-        version = version + 1,
-        updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-    WHERE id = ? AND version = ?
-  `);
+    // 2. Update disputes table with optimistic lock (BR-015)
+    const updateStmt = db.prepare(`
+      UPDATE disputes
+      SET status = ?,
+          track = ?,
+          submitted_at = CASE WHEN ? = 1 THEN strftime('%Y-%m-%dT%H:%M:%fZ', 'now') ELSE submitted_at END,
+          resolved_at = CASE WHEN ? = 1 THEN strftime('%Y-%m-%dT%H:%M:%fZ', 'now') ELSE resolved_at END,
+          version = version + 1,
+          updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+      WHERE id = ? AND version = ?
+    `);
 
-  const updateResult = updateStmt.run(
-    decision.nextStatus,
-    decision.track,
-    isSubmission ? 1 : 0,
-    isTerminal ? 1 : 0,
-    current.id,
-    expectedVersion
-  );
+    const updateResult = updateStmt.run(
+      decision.nextStatus,
+      decision.track,
+      isSubmission ? 1 : 0,
+      isTerminal ? 1 : 0,
+      current.id,
+      expectedVersion
+    );
 
-  if (updateResult.changes === 0) {
-    throw new Error(`BR-015: Optimistic locking conflict on dispute ${current.id}. Expected version ${expectedVersion}.`);
-  }
+    if (updateResult.changes === 0) {
+      throw new Error(`BR-015: Optimistic locking conflict on dispute ${current.id}. Expected version ${expectedVersion}.`);
+    }
 
-  // 3. Insert into ai_assessments (ENT-05)
-  const assessmentId = `asm_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-  const confidenceScore = Math.min(1.0, Math.max(0.6, decision.winProbability * 0.95 + 0.1));
+    // 3. Insert into ai_assessments (ENT-05)
+    const assessmentId = `asm_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const confidenceScore = Math.min(1.0, Math.max(0.6, decision.winProbability * 0.95 + 0.1));
 
-  db.prepare(`
-    INSERT INTO ai_assessments (
-      id, dispute_id, win_probability, expected_value_cents, ev_settle_cents,
-      recommended_action, confidence_score, reasoning_json, model_version,
-      prompt_tokens, completion_tokens, execution_latency_ms, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-  `).run(
-    assessmentId,
-    current.id,
-    decision.winProbability,
-    decision.evCompeteCents,
-    decision.evSettleCents,
-    decision.action,
-    confidenceScore,
-    JSON.stringify({
-      rule_id: decision.ruleId,
-      rationale: decision.rationale,
-      track: decision.track,
-      next_status: decision.nextStatus,
-    }),
-    modelVersion,
-    145,
-    62,
-    latencyMs
-  );
+    db.prepare(`
+      INSERT INTO ai_assessments (
+        id, dispute_id, win_probability, expected_value_cents, ev_settle_cents,
+        recommended_action, confidence_score, reasoning_json, model_version,
+        prompt_tokens, completion_tokens, execution_latency_ms, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+    `).run(
+      assessmentId,
+      current.id,
+      decision.winProbability,
+      decision.evCompeteCents,
+      decision.evSettleCents,
+      decision.action,
+      confidenceScore,
+      JSON.stringify({
+        rule_id: decision.ruleId,
+        rationale: decision.rationale,
+        track: decision.track,
+        next_status: decision.nextStatus,
+      }),
+      modelVersion,
+      145,
+      62,
+      latencyMs
+    );
 
-  // 4. Insert into audit_logs (ENT-09)
-  const auditId = `aud_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-  db.prepare(`
-    INSERT INTO audit_logs (
-      id, merchant_id, entity_type, entity_id, action, actor_id, actor_type,
-      previous_state_json, new_state_json, rule_ids_checked, guardrail_status,
-      ip_address, created_at
-    ) VALUES (?, ?, 'disputes', ?, 'DISPUTE_ASSESSED_AND_ROUTED', ?, 'AI_AGENT', ?, ?, ?, 'PASSED', ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-  `).run(
-    auditId,
-    merchantId,
-    current.id,
-    actorId,
-    JSON.stringify({ status: current.status, track: current.track, version: current.version }),
-    JSON.stringify({ status: decision.nextStatus, track: decision.track, action: decision.action, rule_id: decision.ruleId }),
-    JSON.stringify([decision.ruleId, 'BR-016', 'BR-003', 'BR-007']),
-    ipAddress
-  );
+    // 4. Insert into audit_logs (ENT-09)
+    const auditId = `aud_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    db.prepare(`
+      INSERT INTO audit_logs (
+        id, merchant_id, entity_type, entity_id, action, actor_id, actor_type,
+        previous_state_json, new_state_json, rule_ids_checked, guardrail_status,
+        ip_address, created_at
+      ) VALUES (?, ?, 'disputes', ?, 'DISPUTE_ASSESSED_AND_ROUTED', ?, 'AI_AGENT', ?, ?, ?, 'PASSED', ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+    `).run(
+      auditId,
+      merchantId,
+      current.id,
+      actorId,
+      JSON.stringify({ status: current.status, track: current.track, version: current.version }),
+      JSON.stringify({ status: decision.nextStatus, track: decision.track, action: decision.action, rule_id: decision.ruleId }),
+      JSON.stringify([decision.ruleId, 'BR-016', 'BR-003', 'BR-007']),
+      ipAddress
+    );
 
-  return { assessmentId, auditId };
+    return { assessmentId, auditId };
+  })();
 }

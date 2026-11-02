@@ -6,7 +6,7 @@
 import { NextResponse } from 'next/server';
 import { getDb, runTransaction } from '@/lib/db';
 import { getPayPalClient } from '@/lib/paypal';
-import { evaluatePolicyFirewall, validateSettlementOffer } from '@/lib/firewall/policy-firewall';
+import { evaluatePolicyFirewall } from '@/lib/firewall/policy-firewall';
 import { recordFirewallAuditLog } from '@/lib/firewall/audit-logger';
 
 const MCP_TOOL_DEFINITIONS = [
@@ -150,6 +150,20 @@ export async function POST(req: Request) {
         });
       }
 
+      // Resolve the dispute's own session server-side (never trust a client-supplied session id)
+      const session = db.prepare(`
+        SELECT id FROM negotiation_sessions WHERE dispute_id = ? AND status = 'ACTIVE'
+      `).get(dispute.id) as { id: string } | undefined;
+
+      if (!session) {
+        return NextResponse.json({
+          success: false,
+          tool: 'make-offer',
+          error: 'NO_ACTIVE_NEGOTIATION_SESSION',
+          reason: `Dispute ${dispute.id} has no active negotiation session`,
+        }, { status: 409 });
+      }
+
       // Valid offer -> Dispatch to PayPal Client & record in settlement_offers
       const paypalRes = await paypalClient.makeOffer(dispute.paypal_dispute_id || dispute.id, {
         amount_cents: offeredCents,
@@ -162,11 +176,11 @@ export async function POST(req: Request) {
           INSERT INTO settlement_offers (
             id, dispute_id, negotiation_session_id, offer_type, offered_amount_cents,
             max_allowed_cents, status, paypal_offer_id, proposed_by, created_at, updated_at
-          ) VALUES (?, ?, 'neg_' || ?, 'PARTIAL_REFUND', ?, ?, 'PROPOSED', ?, 'AGENT', strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+          ) VALUES (?, ?, ?, 'PARTIAL_REFUND', ?, ?, 'PROPOSED', ?, 'AGENT', strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
         `).run(
           offerId,
           dispute.id,
-          dispute.id,
+          session.id,
           offeredCents,
           firewallResult.max_allowed_cents,
           paypalRes.paypal_reference_id

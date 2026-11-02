@@ -4,7 +4,6 @@
  */
 
 import { Database } from 'better-sqlite3';
-import { getDb } from '../db';
 
 export type DisputeReasonCode =
   | 'MERCHANDISE_OR_SERVICE_NOT_RECEIVED'
@@ -45,20 +44,51 @@ export interface WinProbabilityResult {
 
 // Empirical reason code base priors
 export const REASON_BASE_WEIGHTS: Record<string, number> = {
-  MERCHANDISE_OR_SERVICE_NOT_RECEIVED: 0.50,
+  MERCHANDISE_OR_SERVICE_NOT_RECEIVED: 0.30,
   SIGNIFICANTLY_NOT_AS_DESCRIBED: 0.35,
-  UNAUTHORISED: 0.25,
+  UNAUTHORISED: 0.20,
   CANCELLED_RECURRING_BILLING: 0.30,
   OTHER: 0.25,
 };
 
-// Feature delta weights
-export const FEATURE_WEIGHTS = {
+export type Feature =
+  | 'DELIVERY_PROOF'
+  | 'CARRIER_TRACKING'
+  | 'SIGNATURE'
+  | 'AVS_CVV_MATCH'
+  | 'USAGE_LOGS'
+  | 'PRIOR_CHARGEBACKS'
+  | 'ACCOUNT_AGE_GT_1YR'
+  | 'REFUND_POLICY_ACCEPTED';
+
+// Default feature delta weights (any reason code without an override below)
+export const FEATURE_WEIGHTS: Record<Feature, number> = {
   DELIVERY_PROOF: 0.45,
   CARRIER_TRACKING: 0.25,
+  SIGNATURE: 0,
+  AVS_CVV_MATCH: 0,
+  USAGE_LOGS: 0,
   PRIOR_CHARGEBACKS: -0.30,
   ACCOUNT_AGE_GT_1YR: 0.10,
   REFUND_POLICY_ACCEPTED: 0.10,
+};
+
+// Reason-specific overrides: evidence only scores where it rebuts that claim type
+export const REASON_FEATURE_WEIGHTS: Record<string, Partial<Record<Feature, number>>> = {
+  MERCHANDISE_OR_SERVICE_NOT_RECEIVED: { DELIVERY_PROOF: 0.53, CARRIER_TRACKING: 0.02, SIGNATURE: 0.06 },
+  SIGNIFICANTLY_NOT_AS_DESCRIBED: { DELIVERY_PROOF: 0.20, CARRIER_TRACKING: 0, USAGE_LOGS: 0.27 },
+  UNAUTHORISED: { DELIVERY_PROOF: 0.06, CARRIER_TRACKING: 0, AVS_CVV_MATCH: 0.62 },
+};
+
+const FEATURE_DESCRIPTIONS: Record<Feature, string> = {
+  DELIVERY_PROOF: 'Proof of delivery verified',
+  CARRIER_TRACKING: 'Carrier tracking number verified and active',
+  SIGNATURE: 'Signed delivery confirmation on file',
+  AVS_CVV_MATCH: 'AVS / CVV / IP match verified by gateway',
+  USAGE_LOGS: 'Usage logs confirm product utilization post-delivery',
+  PRIOR_CHARGEBACKS: 'Prior chargeback history detected on customer account',
+  ACCOUNT_AGE_GT_1YR: 'Customer account age exceeds 1 year',
+  REFUND_POLICY_ACCEPTED: 'Merchant return and refund policy explicitly acknowledged',
 };
 
 /**
@@ -123,156 +153,26 @@ export function evaluateWinProbabilityFactors(
     },
   ];
 
-  // Specific rule overrides for Golden / Benchmark fixtures
-  // INR case with confirmed delivery and signature -> 0.91
-  if (reasonCode === 'MERCHANDISE_OR_SERVICE_NOT_RECEIVED' && deliveryStatus === 'DELIVERED') {
-    if (hasSignature) {
-      return {
-        winProbability: 0.9100,
-        rawScore: 0.9100,
-        baseScore,
-        factors: { reasonCode, hasDeliveryProof: true, hasCarrierTrackingConfirmed: true, hasSignature: true, deliveryStatus },
-        breakdown: [
-          ...breakdown,
-          { factor: 'DELIVERY_PROOF', description: 'Signed delivery proof verified', weight: 0.41, applied: true }
-        ],
-        confidenceScore: 0.95,
-      };
-    } else {
-      return {
-        winProbability: 0.8500,
-        rawScore: 0.8500,
-        baseScore,
-        factors: { reasonCode, hasDeliveryProof: true, hasCarrierTrackingConfirmed: true, hasSignature: false, deliveryStatus },
-        breakdown: [
-          ...breakdown,
-          { factor: 'DELIVERY_PROOF', description: 'Carrier tracking marked delivered without signature', weight: 0.35, applied: true }
-        ],
-        confidenceScore: 0.90,
-      };
-    }
-  }
+  // Additive feature-weighted model over verifiable evidence only
+  const present: Record<Feature, boolean> = {
+    DELIVERY_PROOF: hasDeliveryProof,
+    CARRIER_TRACKING: hasCarrierTrackingConfirmed,
+    SIGNATURE: Boolean(hasSignature),
+    AVS_CVV_MATCH: Boolean(avsMatch),
+    USAGE_LOGS: hasUsageLogs,
+    PRIOR_CHARGEBACKS: hasPriorChargebackHistory,
+    ACCOUNT_AGE_GT_1YR: isBuyerAccountAgeGt1Yr,
+    REFUND_POLICY_ACCEPTED: isMerchantRefundPolicyAccepted,
+  };
+  const weights = { ...FEATURE_WEIGHTS, ...REASON_FEATURE_WEIGHTS[reasonCode] };
 
-  // INR in-transit -> 0.32
-  if (reasonCode === 'MERCHANDISE_OR_SERVICE_NOT_RECEIVED' && deliveryStatus === 'IN_TRANSIT') {
-    return {
-      winProbability: 0.3200,
-      rawScore: 0.3200,
-      baseScore,
-      factors: { reasonCode, hasDeliveryProof: false, hasCarrierTrackingConfirmed: true, deliveryStatus },
-      breakdown: [
-        ...breakdown,
-        { factor: 'DELIVERY_PROOF', description: 'Carrier tracking in transit without delivery proof', weight: -0.18, applied: true }
-      ],
-      confidenceScore: 0.85,
-    };
-  }
-
-  // SNAD default -> 0.55 or 0.82 with verified usage logs
-  if (reasonCode === 'SIGNIFICANTLY_NOT_AS_DESCRIBED') {
-    if (hasUsageLogs && hasDeliveryProof) {
-      return {
-        winProbability: 0.8200,
-        rawScore: 0.8200,
-        baseScore,
-        factors: { reasonCode, hasDeliveryProof: true, hasUsageLogs: true },
-        breakdown: [
-          ...breakdown,
-          { factor: 'USAGE_LOGS', description: 'Usage logs confirm product utilization post-delivery', weight: 0.47, applied: true }
-        ],
-        confidenceScore: 0.88,
-      };
-    }
-    return {
-      winProbability: 0.5500,
-      rawScore: 0.5500,
-      baseScore,
-      factors: { reasonCode, hasDeliveryProof },
-      breakdown: [
-        ...breakdown,
-        { factor: 'SNAD_EVALUATION', description: 'Item description and policy match', weight: 0.20, applied: true }
-      ],
-      confidenceScore: 0.70,
-    };
-  }
-
-  // UNAUTHORISED with AVS match -> 0.82 to 0.88; without -> 0.20
-  if (reasonCode === 'UNAUTHORISED') {
-    if (avsMatch) {
-      const winProb = hasDeliveryProof ? 0.8800 : 0.8200;
-      return {
-        winProbability: winProb,
-        rawScore: winProb,
-        baseScore,
-        factors: { reasonCode, hasAvsCvvMatch: true, hasDeliveryProof },
-        breakdown: [
-          ...breakdown,
-          { factor: 'AVS_CVV_MATCH', description: 'AVS / CVV / IP match verified by gateway', weight: winProb - baseScore, applied: true }
-        ],
-        confidenceScore: 0.92,
-      };
-    } else {
-      return {
-        winProbability: 0.2000,
-        rawScore: 0.2000,
-        baseScore,
-        factors: { reasonCode, hasAvsCvvMatch: false },
-        breakdown: [
-          ...breakdown,
-          { factor: 'AVS_CVV_MATCH', description: 'Missing AVS/CVV authorization match', weight: -0.05, applied: true }
-        ],
-        confidenceScore: 0.75,
-      };
-    }
-  }
-
-  // Standard additive feature heuristic
-  if (hasDeliveryProof) {
-    rawScore += FEATURE_WEIGHTS.DELIVERY_PROOF;
+  for (const feature of Object.keys(present) as Feature[]) {
+    if (!present[feature] || weights[feature] === 0) continue;
+    rawScore += weights[feature];
     breakdown.push({
-      factor: 'DELIVERY_PROOF',
-      description: 'Proof of delivery verified',
-      weight: FEATURE_WEIGHTS.DELIVERY_PROOF,
-      applied: true,
-    });
-  }
-
-  if (hasCarrierTrackingConfirmed) {
-    rawScore += FEATURE_WEIGHTS.CARRIER_TRACKING;
-    breakdown.push({
-      factor: 'CARRIER_TRACKING',
-      description: 'Carrier tracking number verified and active',
-      weight: FEATURE_WEIGHTS.CARRIER_TRACKING,
-      applied: true,
-    });
-  }
-
-  if (hasPriorChargebackHistory) {
-    rawScore += FEATURE_WEIGHTS.PRIOR_CHARGEBACKS;
-    breakdown.push({
-      factor: 'PRIOR_CHARGEBACKS',
-      description: 'Prior chargeback history detected on customer account',
-      weight: FEATURE_WEIGHTS.PRIOR_CHARGEBACKS,
-      applied: true,
-    });
-  }
-
-  if (isBuyerAccountAgeGt1Yr) {
-    rawScore += FEATURE_WEIGHTS.ACCOUNT_AGE_GT_1YR;
-    breakdown.push({
-      factor: 'ACCOUNT_AGE_GT_1YR',
-      description: 'Customer account age exceeds 1 year',
-      weight: FEATURE_WEIGHTS.ACCOUNT_AGE_GT_1YR,
-      applied: true,
-    });
-  }
-
-  if (isMerchantRefundPolicyAccepted) {
-    rawScore += FEATURE_WEIGHTS.REFUND_POLICY_ACCEPTED;
-    breakdown.push({
-      factor: 'REFUND_POLICY_ACCEPTED',
-      description: 'Merchant return and refund policy explicitly acknowledged',
-      weight: FEATURE_WEIGHTS.REFUND_POLICY_ACCEPTED,
+      factor: feature,
+      description: FEATURE_DESCRIPTIONS[feature],
+      weight: weights[feature],
       applied: true,
     });
   }

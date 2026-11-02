@@ -29,9 +29,9 @@ import {
 
 describe('Decision Engine: AI Win Probability (BR-003)', () => {
   it('enforces exact reason base weights for INR, SNAD, UNAUTHORISED, RECURRING, and OTHER', () => {
-    expect(REASON_BASE_WEIGHTS['MERCHANDISE_OR_SERVICE_NOT_RECEIVED']).toBe(0.50);
+    expect(REASON_BASE_WEIGHTS['MERCHANDISE_OR_SERVICE_NOT_RECEIVED']).toBe(0.30);
     expect(REASON_BASE_WEIGHTS['SIGNIFICANTLY_NOT_AS_DESCRIBED']).toBe(0.35);
-    expect(REASON_BASE_WEIGHTS['UNAUTHORISED']).toBe(0.25);
+    expect(REASON_BASE_WEIGHTS['UNAUTHORISED']).toBe(0.20);
     expect(REASON_BASE_WEIGHTS['CANCELLED_RECURRING_BILLING']).toBe(0.30);
     expect(REASON_BASE_WEIGHTS['OTHER']).toBe(0.25);
   });
@@ -93,6 +93,18 @@ describe('Decision Engine: AI Win Probability (BR-003)', () => {
       hasAvsCvvMatch: false,
     });
     expect(withoutAvs.winProbability).toBe(0.2000);
+  });
+
+  it('scores every reason through the same additive model (no fixture short-circuits)', () => {
+    const result = evaluateWinProbabilityFactors({
+      reasonCode: 'MERCHANDISE_OR_SERVICE_NOT_RECEIVED',
+      deliveryStatus: 'DELIVERED',
+      hasSignature: true,
+      hasPriorChargebackHistory: true,
+    });
+    const sum = result.breakdown.reduce((acc, b) => acc + b.weight, 0);
+    expect(result.winProbability).toBe(clampProbability(sum));
+    expect(result.winProbability).toBe(0.6100);
   });
 });
 

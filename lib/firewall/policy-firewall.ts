@@ -237,7 +237,11 @@ export function evaluatePolicyFirewall(
   // 3. Check Cumulative Refund Cap (BR-014)
   if (context.orderAmountCents !== undefined && context.cumulativeRefundedCents !== undefined) {
     if (context.cumulativeRefundedCents + context.offeredCents > context.orderAmountCents) {
-      const remainingAllowed = Math.max(0, context.orderAmountCents - context.cumulativeRefundedCents);
+      // BR-004 still bounds the clamp: remaining order balance can never lift the offer above the cap
+      const remainingAllowed = Math.min(
+        Math.max(0, context.orderAmountCents - context.cumulativeRefundedCents),
+        calculateRefundCap(context.disputeAmountCents, policy.max_refund_offer_pct)
+      );
       recordFirewallAuditLog({
         merchantId: context.merchantId,
         entityType: 'settlement_offers',
