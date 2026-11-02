@@ -1,4 +1,4 @@
-# BRIEFING — 2026-11-02T10:51:00Z
+# BRIEFING — 2026-11-02T11:21:00Z
 
 ## Mission
 Orchestrate end-to-end development of ChargebackShield (AI Dispute & Refund Resolution Autopilot for PayPal AI Hackathon) following DDDL v1.0.
@@ -20,14 +20,14 @@ Orchestrate end-to-end development of ChargebackShield (AI Dispute & Refund Reso
 - **Work items**:
   1. Survey phase [done]
   2. Architecture & Decomposition (PROJECT.md) [done]
-  3. Milestone 1: Data Foundation & Pre-Code Quality Gates [in-progress: Remediation Iteration 2]
+  3. Milestone 1: Data Foundation & Pre-Code Quality Gates [done: Gate PASS, pushed to origin/main]
   4. E2E Testing Track (TEST_INFRA.md, Tiers 1–4) [done: TEST_READY.md published]
-  5. Milestone 2: Core Engines (EV Router, MCP Firewall, Dual-Mode Sandbox) [pending]
+  5. Milestone 2: Core Engines (EV Router, MCP Firewall, Dual-Mode Sandbox) [in-progress: Worker Implementation]
   6. Milestone 3: C-Suite BI & What-If Simulator [pending]
   7. Milestone 4: Dispute Workbench, Evidence Verifier & Buyer Portal [pending]
   8. Milestone 5: 100% E2E Pass, Adversarial Hardening & Release Package [pending]
-- **Current phase**: Milestone 1 (Iteration 2: Worker Remediation)
-- **Current focus**: Milestone 1 Remediation of PK nullability, triggers, integer cents, seeder baseline
+- **Current phase**: Milestone 2 (Iteration 1: Worker Execution)
+- **Current focus**: Milestone 2 Worker Implementation (EV Router, MCP Firewall, Dual-Mode PayPal Sandbox & APIs)
 
 ## 🔒 Key Constraints
 - Subagents must be spawned with Model 'flash'.
@@ -46,8 +46,9 @@ Orchestrate end-to-end development of ChargebackShield (AI Dispute & Refund Reso
 
 ## Key Decisions Made
 - Project Architecture: Next.js 15 App Router + TypeScript + better-sqlite3 + Vitest + Tailwind CSS + Recharts.
-- Milestone 1 Iteration 1 Gate: Reviewer 1 (APPROVE), Challenger 2 (APPROVE), Auditor (CLEAN), Reviewer 2 & Challenger 1 (REQUEST_CHANGES on PK nullability in DDL).
-- worker_m1_fix dispatched to apply NOT NULL to PKs, typeof integer check, terminal state trigger hardening, order amount check trigger, fixed seeder timestamp, and db/index.ts re-export.
+- Milestone 1 passed Gate 100% (584 tests pass, clean build, commit 1a133f6 pushed).
+- Milestone 2 Explorers completed architectural blueprints for EV Engine, Decision Router, MCP Firewall, Injection Defense, and Dual-Mode Sandbox.
+- worker_m2 dispatched with exclusive write ownership to implement Milestone 2.
 
 ## Team Roster
 | Agent | Type | Work Item | Status | Conv ID |
@@ -61,16 +62,20 @@ Orchestrate end-to-end development of ChargebackShield (AI Dispute & Refund Reso
 | test_writer_e2e_1 | teamwork_test_writer | E2E Testing Track: TEST_INFRA.md & Tiers 1–4 | completed | 53c4b5b1-ac9d-4c5b-a414-1b7701e800f9 |
 | worker_m1 | teamwork_worker | M1 Implementation: Schema, Seeder, Pre-Code Tests | completed | 2acb77ef-3493-47ee-9b4b-2c96c64b3510 |
 | reviewer_m1_1 | teamwork_reviewer | M1: Schema & DQ Review | completed (APPROVE) | c6ef5ed1-7b6f-4aea-b225-435dc2b3d09f |
-| reviewer_m1_2 | teamwork_reviewer | M1: Rules, State Machine & NFR Review | completed (REQUEST_CHANGES) | 5e6daa8b-cb50-4e66-bd65-b325492e8b5a |
-| challenger_m1_1 | teamwork_challenger | M1: Data Layer & Seeder Stress Testing | completed (REQUEST_CHANGES) | 19326a99-3e5f-4d85-8801-bd583dc9ec77 |
+| reviewer_m1_2 | teamwork_reviewer | M1: Rules, State Machine & NFR Review | completed (APPROVE) | 5e6daa8b-cb50-4e66-bd65-b325492e8b5a |
+| challenger_m1_1 | teamwork_challenger | M1: Data Layer & Seeder Stress Testing | completed (APPROVE) | 19326a99-3e5f-4d85-8801-bd583dc9ec77 |
 | challenger_m1_2 | teamwork_challenger | M1: Triggers & Business Rules Stress Testing | completed (APPROVE) | 3eeb33b5-5cd8-4b45-ac9e-6f8f47f8b7ef |
 | auditor_m1_1 | teamwork_auditor | M1: Forensic Integrity Audit | completed (CLEAN) | 4dfda6d5-aa4c-4e72-b733-808a2107578c |
-| worker_m1_fix | teamwork_worker | M1 Remediation: Schema PKs, Triggers, Seeder | in-progress | 07112462-dbf8-4877-b318-702d4a83d228 |
+| worker_m1_fix | teamwork_worker | M1 Remediation: Schema PKs, Triggers, Seeder | completed | 07112462-dbf8-4877-b318-702d4a83d228 |
+| explorer_m2_1 | teamwork_explorer | M2: AI EV Engine & Step 18 Decision Router | completed | eb373ab3-7bfd-48c0-afa1-d696a3c05e58 |
+| explorer_m2_2 | teamwork_explorer | M2: MCP Policy Firewall & Injection Defense | completed | 9579121b-1c33-4756-96aa-17888664bfaa |
+| explorer_m2_3 | teamwork_explorer | M2: Dual-Mode PayPal Sandbox & API Endpoints | completed | 745c37f9-76b4-4b7a-979d-dd17f4015f7a |
+| worker_m2 | teamwork_worker | M2 Implementation: Engines, Firewall, PayPal APIs | in-progress | 566d8e32-34cb-4e6f-a607-d293f547fbce |
 
 ## Succession Status
 - Succession required: no
-- Spawn count: 14 / 16
-- Pending subagents: 07112462-dbf8-4877-b318-702d4a83d228
+- Spawn count: 18 / 128
+- Pending subagents: 566d8e32-34cb-4e6f-a607-d293f547fbce
 - Predecessor: none
 - Successor: not yet spawned
 
@@ -85,7 +90,7 @@ Orchestrate end-to-end development of ChargebackShield (AI Dispute & Refund Reso
 - C:\Users\gsjit\OneDrive\Documents\hackathon_champs\paypalai\.agents\teamwork\orchestrator_1\DISPATCH.md — Dispatch log
 - C:\Users\gsjit\OneDrive\Documents\hackathon_champs\paypalai\.agents\teamwork\orchestrator_1\progress.md — Orchestrator progress & heartbeat
 - C:\Users\gsjit\OneDrive\Documents\hackathon_champs\paypalai\.agents\teamwork\orchestrator_1\BRIEFING.md — Working memory
-- C:\Users\gsjit\OneDrive\Documents\hackathon_champs\paypalai\.agents\teamwork\orchestrator_1\GATE_STATUS.md — Milestone 1 Gate Status
+- C:\Users\gsjit\OneDrive\Documents\hackathon_champs\paypalai\.agents\teamwork\orchestrator_1\GATE_STATUS.md — Milestone 1 Gate Status (PASS)
 - C:\Users\gsjit\OneDrive\Documents\hackathon_champs\paypalai\PROJECT.md — Global architecture, milestones, feature inventory
 - C:\Users\gsjit\OneDrive\Documents\hackathon_champs\paypalai\TEST_INFRA.md — E2E Test infrastructure index
 - C:\Users\gsjit\OneDrive\Documents\hackathon_champs\paypalai\TEST_READY.md — E2E Test Suite Readiness Certification
