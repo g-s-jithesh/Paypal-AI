@@ -160,6 +160,21 @@ export function loadMerchantPolicy(merchantId: string, db?: Database): PolicyRul
 }
 
 /**
+ * Merchant policy as routeStep18 / calculateAllEvs inputs, so routing never runs on hardcoded defaults.
+ */
+export function loadPolicyDecisionInputs(merchantId: string, db?: Database) {
+  const policy = loadMerchantPolicy(merchantId, db);
+  return {
+    maxAutoDisputeCents: policy.max_auto_dispute_cents,
+    autoAcceptBelowCents: policy.auto_accept_below_cents,
+    minWinProbAutoSubmit: policy.min_win_prob_auto_submit,
+    minWinProbAutoAccept: policy.min_win_prob_auto_accept,
+    maxRefundOfferPct: normalizeRefundPercentage(policy.max_refund_offer_pct),
+    opsCostCents: policy.default_ops_cost_cents,
+  };
+}
+
+/**
  * Comprehensive Policy Firewall Evaluation against Database.
  * Evaluates BR-004, BR-006, BR-014, and BR-017, and writes audit log.
  */

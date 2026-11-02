@@ -90,7 +90,7 @@ Live mode needs **both** `PAYPAL_MODE=sandbox_live` and credentials; otherwise i
 ### Tests
 
 ```bash
-npm test             # full suite (685 tests, 41 files)
+npm test             # full suite (690 tests, 41 files)
 npm run test:dq      # data quality gate
 npm run test:rules   # business rules BR-001..025 + state machine
 npm run test:nfr     # latency, idempotency, PII masking
@@ -115,7 +115,7 @@ The image bakes in a seeded Golden Dataset, so it serves a working demo with no 
 All amounts are integer **USD cents**.
 
 ### `POST /api/webhooks/paypal`
-PayPal webhook receiver. Deduplicates on `paypal-transmission-id` (`BR-011`), verifies the signature in live mode, then scores, routes and persists the dispute.
+PayPal webhook receiver. Deduplicates on `paypal-transmission-id` (`BR-011`), verifies the signature in live mode, then scores and routes the dispute using the merchant's `policy_rules`. Returns `422` (event stored as `FAILED`) if the order is unknown or smaller than the dispute (`BR-001`); events for terminal disputes are acknowledged without re-routing (`BR-005`).
 
 ```json
 { "id": "WH-123", "event_type": "CUSTOMER.DISPUTE.CREATED",
@@ -148,10 +148,10 @@ Executes a tool through the policy firewall.
 | Tool | Arguments | Firewall behaviour |
 |---|---|---|
 | `make-offer` | `dispute_id`, `offer_amount_cents`, `rationale?` | `403` if amount > $250 (moves to `READY_FOR_REVIEW`); clamped to the refund cap (`BR-004`) and remaining order balance (`BR-014`); `409` if the dispute has no active negotiation session |
-| `provide-evidence` | `dispute_id`, `evidence_type?`, `tracking_number?`, `carrier?`, `notes?` | Moves dispute to `SUBMITTED` |
-| `accept-claim` | `dispute_id`, `reason?` | Moves dispute to `SETTLED_VIA_REFUND` |
+| `provide-evidence` | `dispute_id`, `evidence_type?`, `tracking_number?`, `carrier?`, `notes?` | `403` + human review above $250 (`BR-006`); otherwise moves dispute to `SUBMITTED` |
+| `accept-claim` | `dispute_id`, `reason?` | `403` + human review above the $35 auto-accept ceiling (`BR-017`); otherwise moves dispute to `SETTLED_VIA_REFUND` |
 
-Every tool call, approval and interception is written to the append-only `audit_logs` table.
+All tools return `409` for disputes already in a terminal state, checked before any PayPal call (`BR-005`). Every tool call, approval and interception is written to the append-only `audit_logs` table.
 
 ---
 

@@ -8,6 +8,7 @@ import { getDb, runTransaction } from '@/lib/db';
 import { assessWinProbability } from '@/lib/engine/win-probability';
 import { calculateAllEvs } from '@/lib/engine/ev-engine';
 import { routeStep18 } from '@/lib/engine/decision-router';
+import { loadPolicyDecisionInputs } from '@/lib/firewall/policy-firewall';
 
 export async function POST(
   req: Request,
@@ -33,13 +34,16 @@ export async function POST(
     const winResult = assessWinProbability(db, dispute.id);
 
     // 3. Calculate Expected Values
+    const policyInputs = loadPolicyDecisionInputs(dispute.merchant_id, db);
     const evResult = calculateAllEvs({
+      ...policyInputs,
       winProbability: winResult.winProbability,
       disputeAmountCents: dispute.dispute_amount_cents,
     });
 
     // 4. Step 18 Decision Matrix Routing
     const decision = routeStep18({
+      ...policyInputs,
       disputeAmountCents: dispute.dispute_amount_cents,
       reasonCode: dispute.reason_code,
       deliveryProof: winResult.factors.hasDeliveryProof ?? false,

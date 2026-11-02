@@ -13,7 +13,7 @@ import {
   SettlementOfferContext,
   ProposedToolCall,
 } from './types';
-import { validateSettlementOffer } from './policy-firewall';
+import { evaluatePolicyFirewall } from './policy-firewall';
 import { recordFirewallAuditLog } from './audit-logger';
 
 // ============================================================================
@@ -24,7 +24,7 @@ export const ADVERSARIAL_PATTERNS = [
     name: 'SYSTEM_OVERRIDE',
     category: 'INSTRUCTION_OVERRIDE' as const,
     severity: 'CRITICAL' as const,
-    regex: /(?:system\s+override|ignore\s+(?:all\s+)?(?:previous\s+)?instructions|disregard\s+(?:all\s+)?rules|new\s+system\s+prompt|developer\s+mode|dan\s+mode|you\s+are\s+now\s+an\s+unrestricted)/i,
+    regex: /(?:system\s+override|(?:ignore|disregard|forget|override|bypass)\s+(?:(?:all|any|the|your|my|of|previous|prior|above|earlier|preceding|system)\s+)*(?:instructions?|rules?|guidelines?|directives?|prompts?|polic(?:y|ies)|constraints?)|new\s+system\s+prompt|developer\s+mode|dan\s+mode|you\s+are\s+now\s+an\s+unrestricted)/i,
     description: 'Direct command override attempting to hijack LLM system instructions',
   },
   {
@@ -221,11 +221,8 @@ export function validateModelToolCall(
 
   if (toolCall.name === 'make-offer') {
     const proposedCents = toolCall.arguments.offer_amount_cents ?? 0;
-    const validation = validateSettlementOffer(
-      context.disputeAmountCents,
-      proposedCents,
-      0.40
-    );
+    const validation = evaluatePolicyFirewall({ ...context, offeredCents: proposedCents }, conn);
+    const ruleId = validation.rule_id ?? 'BR-004';
 
     // If offer was clamped or rejected
     if (!validation.allowed || validation.clamped) {
@@ -252,7 +249,7 @@ export function validateModelToolCall(
           clamped_cents: validation.final_amount_cents,
           reason: validation.reason,
         },
-        ruleIdsChecked: ['BR-004'],
+        ruleIdsChecked: [ruleId],
         guardrailStatus: 'BLOCKED',
         ipAddress: context.ipAddress,
       }, conn);
@@ -263,7 +260,7 @@ export function validateModelToolCall(
         reason: validation.reason ?? 'EXCEEDS_POLICY_CAP',
         blockedPattern: 'OFFER_EXCEEDS_POLICY_CAP',
         layer: 'LAYER_3_VALIDATOR',
-        ruleId: 'BR-004',
+        ruleId,
         disputeId: context.disputeId,
         merchantId: context.merchantId,
         sessionId: context.sessionId,
@@ -274,7 +271,7 @@ export function validateModelToolCall(
           title: 'Shield Intercept: Policy Cap Violation Neutralized',
           message: `Attempted to offer $${(proposedCents / 100).toFixed(2)}. Clamped to maximum policy cap of $${(validation.final_amount_cents / 100).toFixed(2)}.`,
           severity: 'warning',
-          badge: 'BR-004 ENFORCED',
+          badge: `${ruleId} ENFORCED`,
         },
       };
 

@@ -10,6 +10,7 @@ import { getPayPalClient, getPayPalMode } from '@/lib/paypal';
 import { evaluateWinProbabilityFactors } from '@/lib/engine/win-probability';
 import { calculateAllEvs } from '@/lib/engine/ev-engine';
 import { routeStep18 } from '@/lib/engine/decision-router';
+import { loadPolicyDecisionInputs } from '@/lib/firewall/policy-firewall';
 
 export async function POST(req: Request) {
   try {
@@ -127,19 +128,20 @@ export async function POST(req: Request) {
         SELECT * FROM orders WHERE id = ? OR paypal_order_id = ?
       `).get(transactionId, transactionId) as any;
 
-      if (!order) {
-        // Fallback to first existing order or create synthetic order
-        order = conn.prepare('SELECT * FROM orders LIMIT 1').get() as any;
-        if (!order) {
-          const ordId = `ord_${Date.now()}`;
-          conn.prepare(`
-            INSERT INTO orders (
-              id, merchant_id, paypal_order_id, customer_email, customer_name,
-              currency, amount_cents, delivery_status, item_summary
-            ) VALUES (?, 'merch_default', ?, 'buyer@example.com', 'Buyer', 'USD', ?, 'DELIVERED', 'Simulated Item')
-          `).run(ordId, transactionId, disputeAmountCents);
-          order = conn.prepare('SELECT * FROM orders WHERE id = ?').get(ordId) as any;
-        }
+      // Never attach a dispute to an unrelated order: unknown or under-sized orders are recorded as FAILED (BR-001)
+      const rejectReason = !order
+        ? `Unknown order ${transactionId}`
+        : disputeAmountCents > order.amount_cents
+          ? `Dispute amount ${disputeAmountCents} exceeds order amount ${order.amount_cents} (BR-001)`
+          : null;
+
+      if (rejectReason) {
+        conn.prepare(`
+          UPDATE webhook_events
+          SET processing_status = 'FAILED', quarantine_reason = ?, processed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+          WHERE id = ?
+        `).run(rejectReason, eventRecId);
+        return { success: false, status: 'FAILED', webhook_id: transmissionId, error: rejectReason };
       }
 
       const merchantId = order.merchant_id || 'merch_default';
@@ -167,7 +169,18 @@ export async function POST(req: Request) {
         dispute = conn.prepare('SELECT * FROM disputes WHERE id = ?').get(internalDisputeId) as any;
       }
 
+      // BR-005: terminal disputes are immutable; acknowledge the event without re-routing
+      if (['WON', 'LOST', 'SETTLED_VIA_REFUND', 'EXPIRED'].includes(dispute.status)) {
+        conn.prepare(`
+          UPDATE webhook_events
+          SET processing_status = 'PROCESSED', processed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+          WHERE id = ?
+        `).run(eventRecId);
+        return { success: true, status: dispute.status, webhook_id: transmissionId, dispute_id: dispute.id, message: 'Dispute is in a terminal state (BR-005); event acknowledged without re-routing' };
+      }
+
       // Step C: Scoring & Decision Routing
+      const policyInputs = loadPolicyDecisionInputs(merchantId, conn);
       const winResult = evaluateWinProbabilityFactors({
         reasonCode,
         deliveryStatus: order.delivery_status,
@@ -178,11 +191,13 @@ export async function POST(req: Request) {
       });
 
       const evResult = calculateAllEvs({
+        ...policyInputs,
         winProbability: winResult.winProbability,
         disputeAmountCents,
       });
 
       const decision = routeStep18({
+        ...policyInputs,
         disputeAmountCents,
         reasonCode,
         deliveryProof: winResult.factors.hasDeliveryProof ?? false,
@@ -258,7 +273,7 @@ export async function POST(req: Request) {
         const sessionId = `neg_${dispute.id}`;
         const existingSession = conn.prepare('SELECT id FROM negotiation_sessions WHERE dispute_id = ?').get(dispute.id);
         if (!existingSession) {
-          const capCents = Math.floor(disputeAmountCents * 0.40);
+          const capCents = Math.floor(disputeAmountCents * policyInputs.maxRefundOfferPct);
           conn.prepare(`
             INSERT INTO negotiation_sessions (
               id, dispute_id, status, token_hash, max_refund_allowed_cents,
@@ -288,7 +303,7 @@ export async function POST(req: Request) {
       };
     });
 
-    return NextResponse.json(result);
+    return NextResponse.json(result, { status: result.success ? 200 : 422 });
   } catch (err: any) {
     console.error('PayPal Webhook Ingestion Error:', err);
     return NextResponse.json(

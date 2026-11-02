@@ -1,5 +1,6 @@
 import crypto from 'crypto';
 import { getDb, initializeDatabase, closeDb } from '../lib/db';
+import { calculateEvCompete, calculateEvSettle } from '../lib/engine/ev-engine';
 
 // Deterministic Mulberry32 PRNG
 export function createPrng(seed: number) {
@@ -359,10 +360,8 @@ export function runGoldenSeeder(): void {
       });
 
       // Insert AI Assessment (ENT-05)
-      const feeCents = 1500;
-      const opsCents = 500;
-      const evCompete = Math.round(winProb * amountCents - (1 - winProb) * feeCents - opsCents);
-      const evSettle = Math.round(amountCents - amountCents * 0.40);
+      const evCompete = calculateEvCompete(winProb, amountCents);
+      const evSettle = calculateEvSettle(Math.floor(amountCents * 0.40));
 
       db.prepare(`
         INSERT INTO ai_assessments (

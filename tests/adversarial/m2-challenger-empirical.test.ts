@@ -392,7 +392,7 @@ describe('Challenger M2: Empirical Adversarial Stress Suite', () => {
           dispute_id: disputeId,
           dispute_amount: { value: '145.00', currency: 'USD' },
           reason: 'MERCHANDISE_OR_SERVICE_NOT_RECEIVED',
-          disputed_transactions: [{ seller_transaction_id: 'ORD-001' }],
+          disputed_transactions: [{ seller_transaction_id: 'ORD-GOLD-001' }],
         },
       };
 
@@ -437,6 +437,39 @@ describe('Challenger M2: Empirical Adversarial Stress Suite', () => {
       expect(disputeCount).toBe(1);
     });
 
+    const postWebhook = (resource: Record<string, unknown>) => webhookRoutePost(new Request('http://localhost:3000/api/webhooks/paypal', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'paypal-transmission-id': `WH-GUARD-${Date.now()}-${Math.random()}` },
+      body: JSON.stringify({ event_type: 'CUSTOMER.DISPUTE.CREATED', resource }),
+    }));
+
+    it('rejects disputes for unknown or under-sized orders as FAILED instead of attaching them to another order (BR-001)', async () => {
+      const unknown = await postWebhook({
+        dispute_id: `PP-D-UNKNOWN-${Date.now()}`,
+        dispute_amount: { value: '300.00', currency: 'USD' },
+        disputed_transactions: [{ seller_transaction_id: 'ORD-DOES-NOT-EXIST' }],
+      });
+      expect(unknown.status).toBe(422);
+      expect((await unknown.json()).status).toBe('FAILED');
+
+      const oversized = await postWebhook({
+        dispute_id: `PP-D-OVER-${Date.now()}`,
+        dispute_amount: { value: '300.00', currency: 'USD' },
+        disputed_transactions: [{ seller_transaction_id: 'ORD-GOLD-001' }], // order is $145.00
+      });
+      expect(oversized.status).toBe(422);
+    });
+
+    it('acknowledges events for terminal disputes without re-routing them (BR-005)', async () => {
+      const res = await postWebhook({
+        dispute_id: 'DSP-GOLD-003', // SETTLED_VIA_REFUND
+        dispute_amount: { value: '120.00', currency: 'USD' },
+        disputed_transactions: [{ seller_transaction_id: 'ORD-GOLD-003' }],
+      });
+      expect(res.status).toBe(200);
+      expect((await res.json()).status).toBe('SETTLED_VIA_REFUND');
+    });
+
     it('Burst Replay (20 concurrent requests with identical webhook_id): exactly 1 processed and 19 DUPLICATE_IGNORED without DB lockup', async () => {
       const transmissionId = `WH-CONCUR-BURST-${Date.now()}`;
       const disputeId = `PP-D-CONCUR-BURST-${Date.now()}`;
@@ -448,7 +481,7 @@ describe('Challenger M2: Empirical Adversarial Stress Suite', () => {
           dispute_id: disputeId,
           dispute_amount: { value: '85.00', currency: 'USD' },
           reason: 'MERCHANDISE_OR_SERVICE_NOT_RECEIVED',
-          disputed_transactions: [{ seller_transaction_id: 'ORD-002' }],
+          disputed_transactions: [{ seller_transaction_id: 'ORD-GOLD-002' }],
         },
       };
 
@@ -503,7 +536,7 @@ describe('Challenger M2: Empirical Adversarial Stress Suite', () => {
           dispute_id: disputeId,
           dispute_amount: { value: '120.00', currency: 'USD' },
           reason: 'MERCHANDISE_OR_SERVICE_NOT_RECEIVED',
-          disputed_transactions: [{ seller_transaction_id: 'ORD-001' }],
+          disputed_transactions: [{ seller_transaction_id: 'ORD-GOLD-001' }],
         },
       };
 

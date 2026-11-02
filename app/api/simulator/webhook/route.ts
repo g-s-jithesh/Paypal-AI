@@ -9,6 +9,7 @@ import { getDb, runTransaction } from '@/lib/db';
 import { evaluateWinProbabilityFactors } from '@/lib/engine/win-probability';
 import { calculateAllEvs } from '@/lib/engine/ev-engine';
 import { routeStep18 } from '@/lib/engine/decision-router';
+import { loadPolicyDecisionInputs } from '@/lib/firewall/policy-firewall';
 
 export async function POST(req: Request) {
   try {
@@ -78,12 +79,15 @@ export async function POST(req: Request) {
         hasCarrierTrackingConfirmed: Boolean(order?.tracking_number),
       });
 
+      const policyInputs = loadPolicyDecisionInputs(merchantId, conn);
       const evResult = calculateAllEvs({
+        ...policyInputs,
         winProbability: winResult.winProbability,
         disputeAmountCents: amountCents,
       });
 
       const decision = routeStep18({
+        ...policyInputs,
         disputeAmountCents: amountCents,
         reasonCode,
         deliveryProof: winResult.factors.hasDeliveryProof ?? false,
@@ -101,7 +105,7 @@ export async function POST(req: Request) {
         conn.prepare(`
           UPDATE disputes
           SET status = ?, track = ?, version = version + 1, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-          WHERE id = ?
+          WHERE id = ? AND status NOT IN ('WON', 'LOST', 'SETTLED_VIA_REFUND', 'EXPIRED')
         `).run(decision.nextStatus, decision.track, existing.id);
       } else {
         finalDisputeId = `DSP-SIM-${Date.now()}`;

@@ -6,7 +6,8 @@
 import { NextResponse } from 'next/server';
 import { getDb, runTransaction } from '@/lib/db';
 import { getPayPalClient } from '@/lib/paypal';
-import { evaluatePolicyFirewall } from '@/lib/firewall/policy-firewall';
+import { evaluatePolicyFirewall, loadMerchantPolicy } from '@/lib/firewall/policy-firewall';
+import { TERMINAL_STATUSES } from '@/lib/engine/decision-router';
 import { recordFirewallAuditLog } from '@/lib/firewall/audit-logger';
 
 const MCP_TOOL_DEFINITIONS = [
@@ -70,24 +71,78 @@ export async function POST(req: Request) {
     const toolName = body.tool || body.name;
     const args = body.arguments || body.args || {};
 
+    if (!MCP_TOOL_DEFINITIONS.some((t) => t.name === toolName)) {
+      return NextResponse.json({ error: `Unknown tool: ${toolName}` }, { status: 400 });
+    }
+
     const db = getDb();
     const paypalClient = getPayPalClient();
 
+    const disputeId = args.dispute_id;
+    const dispute = db.prepare(`
+      SELECT d.*, o.amount_cents as order_amount_cents
+      FROM disputes d
+      LEFT JOIN orders o ON d.order_id = o.id
+      WHERE d.id = ? OR d.paypal_dispute_id = ?
+    `).get(disputeId, disputeId) as any;
+
+    if (!dispute) {
+      return NextResponse.json({ error: `Dispute ${disputeId} not found` }, { status: 404 });
+    }
+
+    // BR-005: checked before any PayPal call so terminal disputes never trigger external side effects
+    if (TERMINAL_STATUSES.includes(dispute.status)) {
+      return NextResponse.json({
+        success: false,
+        tool: toolName,
+        error: 'DISPUTE_TERMINAL',
+        reason: `Dispute ${dispute.id} is ${dispute.status} and cannot be modified (BR-005)`,
+      }, { status: 409 });
+    }
+
+    // BR-006 / BR-017: the agent may only submit evidence up to the human-review gate,
+    // and only concede claims up to the auto-accept ceiling. Above that, a human decides.
+    if (toolName !== 'make-offer') {
+      const policy = loadMerchantPolicy(dispute.merchant_id, db);
+      const isAccept = toolName === 'accept-claim';
+      const limitCents = isAccept ? policy.auto_accept_below_cents : policy.max_auto_dispute_cents;
+      const ruleId = isAccept ? 'BR-017' : 'BR-006';
+
+      if (dispute.dispute_amount_cents > limitCents) {
+        runTransaction((conn) => {
+          conn.prepare(`
+            UPDATE disputes
+            SET status = 'READY_FOR_REVIEW', track = 'TRACK_D_HUMAN_REVIEW', version = version + 1, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+            WHERE id = ?
+          `).run(dispute.id);
+          recordFirewallAuditLog({
+            merchantId: dispute.merchant_id,
+            entityType: 'disputes',
+            entityId: dispute.id,
+            action: 'HUMAN_REVIEW_REQUIRED',
+            actorId: 'ACT-04',
+            actorType: 'AI_AGENT',
+            newStateJson: { tool: toolName, dispute_amount_cents: dispute.dispute_amount_cents, limit_cents: limitCents },
+            ruleIdsChecked: [ruleId],
+            guardrailStatus: 'BLOCKED',
+          }, conn);
+        }, db);
+
+        return NextResponse.json({
+          success: false,
+          tool: toolName,
+          error: 'HUMAN_REVIEW_REQUIRED',
+          reason: `Dispute amount $${(dispute.dispute_amount_cents / 100).toFixed(2)} exceeds the $${(limitCents / 100).toFixed(2)} autonomous limit for ${toolName} (${ruleId})`,
+          rule_id: ruleId,
+          status: 'READY_FOR_REVIEW',
+          track: 'TRACK_D_HUMAN_REVIEW',
+        }, { status: 403 });
+      }
+    }
+
     // 1. Tool: make-offer
     if (toolName === 'make-offer') {
-      const disputeId = args.dispute_id;
       const offeredCents = Math.round(Number(args.offer_amount_cents || 0));
-
-      const dispute = db.prepare(`
-        SELECT d.*, o.amount_cents as order_amount_cents
-        FROM disputes d
-        LEFT JOIN orders o ON d.order_id = o.id
-        WHERE d.id = ? OR d.paypal_dispute_id = ?
-      `).get(disputeId, disputeId) as any;
-
-      if (!dispute) {
-        return NextResponse.json({ error: `Dispute ${disputeId} not found` }, { status: 404 });
-      }
 
       // Check cumulative refunded cents
       const priorOffers = db.prepare(`
@@ -201,15 +256,6 @@ export async function POST(req: Request) {
 
     // 2. Tool: provide-evidence
     if (toolName === 'provide-evidence') {
-      const disputeId = args.dispute_id;
-      const dispute = db.prepare(`
-        SELECT * FROM disputes WHERE id = ? OR paypal_dispute_id = ?
-      `).get(disputeId, disputeId) as any;
-
-      if (!dispute) {
-        return NextResponse.json({ error: `Dispute ${disputeId} not found` }, { status: 404 });
-      }
-
       const paypalRes = await paypalClient.provideEvidence(dispute.paypal_dispute_id || dispute.id, {
         evidence_type: args.evidence_type || 'PROOF_OF_DELIVERY',
         notes: args.notes,
@@ -217,22 +263,24 @@ export async function POST(req: Request) {
         carrier: args.carrier,
       });
 
-      db.prepare(`
-        UPDATE disputes
-        SET status = 'SUBMITTED', track = 'TRACK_A_AUTO_SUBMIT', submitted_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), version = version + 1, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-        WHERE id = ?
-      `).run(dispute.id);
+      runTransaction((conn) => {
+        conn.prepare(`
+          UPDATE disputes
+          SET status = 'SUBMITTED', track = 'TRACK_A_AUTO_SUBMIT', submitted_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), version = version + 1, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+          WHERE id = ?
+        `).run(dispute.id);
 
-      recordFirewallAuditLog({
-        merchantId: dispute.merchant_id,
-        entityType: 'disputes',
-        entityId: dispute.id,
-        action: 'EVIDENCE_SUBMITTED_VIA_MCP',
-        actorId: 'ACT-04',
-        actorType: 'AI_AGENT',
-        newStateJson: { status: 'SUBMITTED', reference: paypalRes.paypal_reference_id },
-        ruleIdsChecked: ['BR-008', 'BR-016'],
-        guardrailStatus: 'PASSED',
+        recordFirewallAuditLog({
+          merchantId: dispute.merchant_id,
+          entityType: 'disputes',
+          entityId: dispute.id,
+          action: 'EVIDENCE_SUBMITTED_VIA_MCP',
+          actorId: 'ACT-04',
+          actorType: 'AI_AGENT',
+          newStateJson: { status: 'SUBMITTED', reference: paypalRes.paypal_reference_id },
+          ruleIdsChecked: ['BR-008', 'BR-016'],
+          guardrailStatus: 'PASSED',
+        }, conn);
       }, db);
 
       return NextResponse.json({
@@ -246,33 +294,26 @@ export async function POST(req: Request) {
 
     // 3. Tool: accept-claim
     if (toolName === 'accept-claim') {
-      const disputeId = args.dispute_id;
-      const dispute = db.prepare(`
-        SELECT * FROM disputes WHERE id = ? OR paypal_dispute_id = ?
-      `).get(disputeId, disputeId) as any;
-
-      if (!dispute) {
-        return NextResponse.json({ error: `Dispute ${disputeId} not found` }, { status: 404 });
-      }
-
       const paypalRes = await paypalClient.acceptClaim(dispute.paypal_dispute_id || dispute.id, args.reason);
 
-      db.prepare(`
-        UPDATE disputes
-        SET status = 'SETTLED_VIA_REFUND', track = 'TRACK_C_AUTO_ACCEPT', resolved_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), version = version + 1, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-        WHERE id = ?
-      `).run(dispute.id);
+      runTransaction((conn) => {
+        conn.prepare(`
+          UPDATE disputes
+          SET status = 'SETTLED_VIA_REFUND', track = 'TRACK_C_AUTO_ACCEPT', resolved_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), version = version + 1, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+          WHERE id = ?
+        `).run(dispute.id);
 
-      recordFirewallAuditLog({
-        merchantId: dispute.merchant_id,
-        entityType: 'disputes',
-        entityId: dispute.id,
-        action: 'CLAIM_ACCEPTED_VIA_MCP',
-        actorId: 'ACT-04',
-        actorType: 'AI_AGENT',
-        newStateJson: { status: 'SETTLED_VIA_REFUND', reference: paypalRes.paypal_reference_id },
-        ruleIdsChecked: ['BR-017', 'BR-016'],
-        guardrailStatus: 'PASSED',
+        recordFirewallAuditLog({
+          merchantId: dispute.merchant_id,
+          entityType: 'disputes',
+          entityId: dispute.id,
+          action: 'CLAIM_ACCEPTED_VIA_MCP',
+          actorId: 'ACT-04',
+          actorType: 'AI_AGENT',
+          newStateJson: { status: 'SETTLED_VIA_REFUND', reference: paypalRes.paypal_reference_id },
+          ruleIdsChecked: ['BR-017', 'BR-016'],
+          guardrailStatus: 'PASSED',
+        }, conn);
       }, db);
 
       return NextResponse.json({

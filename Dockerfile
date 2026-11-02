@@ -16,6 +16,8 @@ ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1
 COPY --from=builder --chown=node:node /app/.next/standalone ./
 COPY --from=builder --chown=node:node /app/.next/static ./.next/static
+# schema.sql is read at runtime by the reset endpoint; copy explicitly rather than relying on file tracing
+COPY --from=builder --chown=node:node /app/db/schema.sql ./db/schema.sql
 COPY --from=builder --chown=node:node /app/chargeback_shield.db ./chargeback_shield.db
 USER node
 EXPOSE 3000
