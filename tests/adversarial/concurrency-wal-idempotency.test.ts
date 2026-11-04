@@ -54,7 +54,7 @@ function ingestWebhook(db: Database, payload: WebhookPayload): { status: 'PROCES
         payload.amount_cents
       );
 
-      return { status: 'PROCESSED', disputeId: internalDisputeId };
+      return { status: 'PROCESSED' as const, disputeId: internalDisputeId };
     })();
   } catch (err: any) {
     if (err.message.includes('UNIQUE constraint failed: webhook_events.webhook_id')) {
@@ -214,7 +214,7 @@ describe('Tier 5 Adversarial: SQLite WAL Mode Locking & Concurrency Stress', () 
               payload.amount_cents
             );
 
-            return { status: 'PROCESSED', disputeId: internalDisputeId };
+            return { status: 'PROCESSED' as const, disputeId: internalDisputeId };
           })();
         } catch (err) {
           if (err.message.includes('UNIQUE constraint failed: webhook_events.webhook_id')) {
@@ -344,7 +344,7 @@ describe('Tier 5 Adversarial: SQLite WAL Mode Locking & Concurrency Stress', () 
             payload.amount_cents
           );
 
-          return { status: 'PROCESSED', disputeId: internalDisputeId };
+          return { status: 'PROCESSED' as const, disputeId: internalDisputeId };
         })();
 
         db.close();

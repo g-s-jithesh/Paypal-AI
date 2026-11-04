@@ -52,7 +52,7 @@ function processWebhook(db: Database, payload: WebhookPayload): { status: 'PROCE
         payload.amount_cents
       );
 
-      return { status: 'PROCESSED', disputeId: internalDisputeId };
+      return { status: 'PROCESSED' as const, disputeId: internalDisputeId };
     })();
   } catch (err: any) {
     if (err.message.includes('UNIQUE constraint failed: webhook_events.webhook_id')) {
