@@ -13,6 +13,8 @@ RUN npm run build && npm run db:seed
 
 FROM node:22-bookworm-slim AS runner
 WORKDIR /app
+# SQLite WAL creates -wal/-shm files beside the database, so the directory itself must be writable
+RUN chown node:node /app
 ENV NODE_ENV=production \
     PORT=3000 \
     HOSTNAME=0.0.0.0 \
