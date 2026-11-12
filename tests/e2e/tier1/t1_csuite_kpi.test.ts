@@ -7,44 +7,10 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { createTestDb, SqliteDbAdapter, seedBaselineMerchant, calculateCSuiteKPIs } from '../helpers/db-helper';
 import { seedGoldenPersonas } from '../helpers/fixtures';
+import { simulateWhatIfPolicy, projectPolicy, ANALYST_HOURS_PER_ESCALATION } from '../../../lib/kpi';
 
-export function simulateWhatIfPolicy(
-  db: SqliteDbAdapter,
-  newMaxRefundPct: number,
-  newMaxAutoDisputeCents: number
-): {
-  projectedRevenueSavedDollars: number;
-  projectedEscalatedCount: number;
-  projectedAutonomousCount: number;
-} {
-  // Replay over historical disputes
-  const disputes = db.prepare(`SELECT id, dispute_amount_cents, status FROM disputes`).all() as any[];
-  let projectedRevenueSavedCents = 0;
-  let projectedEscalatedCount = 0;
-  let projectedAutonomousCount = 0;
-
-  for (const d of disputes) {
-    if (d.dispute_amount_cents > newMaxAutoDisputeCents) {
-      projectedEscalatedCount++;
-    } else {
-      projectedAutonomousCount++;
-    }
-
-    if (d.status === 'WON') {
-      projectedRevenueSavedCents += d.dispute_amount_cents;
-    } else if (d.status === 'SETTLED_VIA_REFUND') {
-      // Re-calculate settlement based on new simulated cap
-      const simulatedRefund = Math.floor(d.dispute_amount_cents * newMaxRefundPct);
-      projectedRevenueSavedCents += (d.dispute_amount_cents - simulatedRefund);
-    }
-  }
-
-  return {
-    projectedRevenueSavedDollars: Math.round(projectedRevenueSavedCents) / 100.0,
-    projectedEscalatedCount,
-    projectedAutonomousCount
-  };
-}
+// Production What-If replay (the simulator runs this same function)
+export { simulateWhatIfPolicy };
 
 describe('Tier 1: Features 15-18 C-Suite BI & What-If Simulator', () => {
   let db: SqliteDbAdapter;
@@ -200,6 +166,19 @@ describe('Tier 1: Features 15-18 C-Suite BI & What-If Simulator', () => {
       expect(projection).toHaveProperty('projectedRevenueSavedDollars');
       expect(projection).toHaveProperty('projectedEscalatedCount');
       expect(projection).toHaveProperty('projectedAutonomousCount');
+    });
+
+    it('F17-TC6: Min win probability gates auto-submit and escalations drive analyst hours', () => {
+      const rows = [
+        { dispute_amount_cents: 10000, status: 'OPEN', win_probability: 0.9 },
+        { dispute_amount_cents: 10000, status: 'OPEN', win_probability: 0.6 },
+        { dispute_amount_cents: 40000, status: 'OPEN', win_probability: 0.95 },
+      ];
+      const strict = projectPolicy(rows, { maxRefundPct: 0.4, maxAutoDisputeCents: 25000, minWinProb: 0.8 });
+      const loose = projectPolicy(rows, { maxRefundPct: 0.4, maxAutoDisputeCents: 25000, minWinProb: 0.5 });
+      expect(strict.projectedAutoSubmitCount).toBe(1);
+      expect(loose.projectedAutoSubmitCount).toBe(2); // the $400 dispute is escalated, never auto-submitted
+      expect(strict.projectedAnalystHours).toBe(ANALYST_HOURS_PER_ESCALATION);
     });
 
     it('F17-TC5: Extreme threshold test (0% refund policy) simulates maximum retention', () => {

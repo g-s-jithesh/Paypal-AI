@@ -4,7 +4,6 @@
  * Automatically utilizes better-sqlite3 or Node 24 native node:sqlite.
  */
 
-import { CSuiteKPIReport } from './contracts';
 
 export interface SqliteDbAdapter {
   exec(sql: string): void;
@@ -369,72 +368,5 @@ export function seedBaselineMerchant(db: SqliteDbAdapter, merchantId: string = '
   `).run(`pol_${merchantId}`, merchantId);
 }
 
-/**
- * Reconciles and computes the exact C-Suite KPIs directly from the SQLite database.
- */
-export function calculateCSuiteKPIs(db: SqliteDbAdapter): CSuiteKPIReport {
-  // KPI-001: Win Rate %
-  const winRateRow = db.prepare(`
-    SELECT 
-      ROUND(COUNT(CASE WHEN status = 'WON' THEN 1 END) * 100.0 / 
-            NULLIF(COUNT(CASE WHEN status IN ('WON', 'LOST') THEN 1 END), 0), 2) AS win_rate_pct,
-      COUNT(*) AS total_disputes
-    FROM disputes;
-  `).get() as any;
-
-  // KPI-002: Net Revenue Saved ($)
-  const revenueRow = db.prepare(`
-    SELECT 
-      ROUND(SUM(
-        CASE 
-          WHEN d.status = 'WON' THEN d.dispute_amount_cents 
-          WHEN d.status = 'SETTLED_VIA_REFUND' THEN (d.dispute_amount_cents - COALESCE(o.offered_amount_cents, d.dispute_amount_cents))
-          ELSE 0 
-        END
-      ) / 100.0, 2) AS net_revenue_saved_dollars
-    FROM disputes d
-    LEFT JOIN settlement_offers o ON d.id = o.dispute_id AND o.status = 'ACCEPTED';
-  `).get() as any;
-
-  // KPI-003: Pre-Escalation Deflection Rate (%)
-  const deflectionRow = db.prepare(`
-    SELECT 
-      ROUND(COUNT(CASE WHEN status = 'SETTLED_VIA_REFUND' THEN 1 END) * 100.0 / 
-            NULLIF(COUNT(*), 0), 2) AS deflection_rate_pct
-    FROM disputes;
-  `).get() as any;
-
-  // KPI-004: Chargeback Fee Avoidance ($) ($15.00 saved for every non-lost dispute)
-  const feeRow = db.prepare(`
-    SELECT 
-      ROUND(COUNT(CASE WHEN status IN ('WON', 'SETTLED_VIA_REFUND') THEN 1 END) * 15.00, 2) AS fee_avoidance_dollars
-    FROM disputes;
-  `).get() as any;
-
-  // KPI-005: Autonomous Resolution Rate (%)
-  const autoRow = db.prepare(`
-    SELECT 
-      ROUND(COUNT(CASE WHEN status IN ('WON', 'SETTLED_VIA_REFUND') AND id NOT IN (
-        SELECT entity_id FROM audit_logs WHERE actor_id = 'ACT-01' AND action = 'MANUAL_OVERRIDE'
-      ) THEN 1 END) * 100.0 / NULLIF(COUNT(*), 0), 2) AS autonomous_resolution_rate_pct
-    FROM disputes;
-  `).get() as any;
-
-  // KPI-006: Mean Time to Evidence Submission (MTTES in seconds)
-  const mttesRow = db.prepare(`
-    SELECT 
-      ROUND(AVG(strftime('%s', submitted_at) - strftime('%s', created_at)), 1) AS mttes_seconds
-    FROM disputes
-    WHERE status IN ('SUBMITTED', 'WON', 'LOST') AND submitted_at IS NOT NULL;
-  `).get() as any;
-
-  return {
-    kpi_001_win_rate_pct: winRateRow?.win_rate_pct ?? 0,
-    kpi_002_net_revenue_saved_dollars: revenueRow?.net_revenue_saved_dollars ?? 0,
-    kpi_003_deflection_rate_pct: deflectionRow?.deflection_rate_pct ?? 0,
-    kpi_004_fee_avoidance_dollars: feeRow?.fee_avoidance_dollars ?? 0,
-    kpi_005_autonomous_resolution_rate_pct: autoRow?.autonomous_resolution_rate_pct ?? 0,
-    kpi_006_mttes_seconds: mttesRow?.mttes_seconds ?? null,
-    total_disputes: winRateRow?.total_disputes ?? 0
-  };
-}
+// Production KPI queries (the dashboard runs these same functions)
+export { calculateCSuiteKPIs } from '../../../lib/kpi';

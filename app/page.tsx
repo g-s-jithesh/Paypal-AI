@@ -1,126 +1,150 @@
 import Link from 'next/link';
-import {
-  Shield,
-  FileCheck,
-  MessageSquare,
-  TrendingUp,
-  AlertTriangle,
-  ArrowRight,
-  CheckCircle2,
-  Lock,
-} from 'lucide-react';
+import { getDb } from '@/lib/db';
+import { calculateCSuiteKPIs, getAnomalies, getReasonBreakdown, loadReplayRows } from '@/lib/kpi';
+import { normalizeRefundPercentage } from '@/lib/firewall/policy-firewall';
+import WhatIfSimulator from '@/components/WhatIfSimulator';
 
-export default function HomePage() {
+// Every request re-reads SQLite, so the scorecards always match the database
+export const dynamic = 'force-dynamic';
+
+const usd = (dollars: number) =>
+  dollars.toLocaleString('en-US', { style: 'currency', currency: 'USD' });
+
+const REASON_LABELS: Record<string, string> = {
+  MERCHANDISE_OR_SERVICE_NOT_RECEIVED: 'Item not received (INR)',
+  SIGNIFICANTLY_NOT_AS_DESCRIBED: 'Not as described (SNAD)',
+  UNAUTHORISED: 'Unauthorised',
+  CANCELLED_RECURRING_BILLING: 'Cancelled recurring billing',
+  OTHER: 'Other',
+};
+
+export default function DashboardPage() {
+  const db = getDb();
+  const kpis = calculateCSuiteKPIs(db);
+  const reasons = getReasonBreakdown(db);
+  const anomalies = getAnomalies(db);
+  const replayRows = loadReplayRows(db);
+  const policy = (db.prepare(`
+    SELECT max_auto_dispute_cents, max_refund_offer_pct, min_win_prob_auto_submit
+    FROM policy_rules WHERE is_active = 1 ORDER BY version DESC LIMIT 1
+  `).get() as any) ?? { max_auto_dispute_cents: 25000, max_refund_offer_pct: 0.4, min_win_prob_auto_submit: 0.75 };
+
+  const cards = [
+    { id: 'KPI-001', label: 'Win rate', value: `${kpis.kpi_001_win_rate_pct.toFixed(1)}%`, hint: 'Won ÷ (won + lost)' },
+    { id: 'KPI-002', label: 'Net revenue saved', value: usd(kpis.kpi_002_net_revenue_saved_dollars), hint: 'Wins + settlement savings' },
+    { id: 'KPI-003', label: 'Deflection rate', value: `${kpis.kpi_003_deflection_rate_pct.toFixed(1)}%`, hint: 'Settled before escalation' },
+    { id: 'KPI-004', label: 'Fee avoidance', value: usd(kpis.kpi_004_fee_avoidance_dollars), hint: '$15 per non-lost case' },
+    { id: 'KPI-005', label: 'Autonomous rate', value: `${kpis.kpi_005_autonomous_resolution_rate_pct.toFixed(1)}%`, hint: 'Resolved with no analyst override' },
+    {
+      id: 'KPI-006',
+      label: 'Time to evidence',
+      value: kpis.kpi_006_mttes_seconds === null ? '—' : `${kpis.kpi_006_mttes_seconds.toFixed(1)}s`,
+      hint: 'Mean creation → submission',
+    },
+  ];
+
+  const alerts = [
+    { label: 'Past SLA deadline', value: anomalies.sla_breached, tone: 'red' },
+    { label: 'Due within 48h', value: anomalies.sla_due_48h, tone: 'amber' },
+    { label: 'Awaiting human review', value: anomalies.awaiting_human_review, tone: 'amber' },
+    { label: 'Firewall interceptions', value: anomalies.guardrail_blocks, tone: 'blue' },
+    { label: 'Quarantined webhooks', value: anomalies.quarantined_webhooks, tone: 'red' },
+  ] as const;
+
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col">
-      {/* Top Navigation */}
-      <header className="border-b border-slate-800 bg-slate-900/80 backdrop-blur sticky top-0 z-30">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="h-9 w-9 rounded-lg bg-blue-600 flex items-center justify-center font-bold text-white shadow-lg shadow-blue-500/20">
-              <Shield className="h-5 w-5" />
-            </div>
-            <div>
-              <span className="font-bold text-lg text-white tracking-tight">ChargebackShield</span>
-              <span className="ml-2 text-xs font-semibold px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-300 border border-blue-500/30">
-                AI Autopilot
-              </span>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-4">
-            <Link
-              href="/disputes"
-              className="text-xs font-semibold px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white transition flex items-center gap-1.5 shadow-md shadow-blue-600/20"
-            >
-              <FileCheck className="h-4 w-4" />
-              Open Dispute Workbench
-            </Link>
-          </div>
+    <main className="mx-auto max-w-7xl px-4 pb-32 pt-8 sm:px-8">
+      <header className="flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight text-white">ChargebackShield</h1>
+          <p className="mt-1 text-slate-300">Executive dispute command center · {kpis.total_disputes} disputes · live from SQLite</p>
         </div>
+        <nav className="flex flex-wrap gap-2 text-sm font-medium">
+          <Link href="/disputes" className="rounded-lg bg-blue-600 px-4 py-2 text-white hover:bg-blue-500">Dispute workbench</Link>
+          <Link href="/disputes/DSP-GOLD-004" className="rounded-lg border border-slate-800 bg-slate-900 px-4 py-2 text-slate-300 hover:bg-slate-800">High-value approval ($450)</Link>
+          <Link href="/negotiate/DSP-GOLD-002" className="rounded-lg border border-slate-800 bg-slate-900 px-4 py-2 text-slate-300 hover:bg-slate-800">Buyer negotiation</Link>
+        </nav>
       </header>
 
-      {/* Hero Section */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 flex-1 w-full space-y-12">
-        <div className="text-center max-w-3xl mx-auto space-y-4">
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-500/10 text-blue-400 text-xs font-semibold border border-blue-500/20">
-            <Lock className="h-3.5 w-3.5" />
-            Talencia Global DDDL v1.0 Certified · Production-Ready
+      <section aria-label="Key performance indicators" className="mt-8 grid grid-cols-2 gap-4 lg:grid-cols-3 xl:grid-cols-6">
+        {cards.map((c) => (
+          <div key={c.id} className="rounded-xl border border-slate-800 bg-slate-900 p-4 shadow-sm">
+            <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">{c.label}</div>
+            <div className="mt-2 text-2xl font-bold tabular-nums text-white">{c.value}</div>
+            <div className="mt-1 text-xs text-slate-400">{c.hint}</div>
+            <div className="mt-2 font-mono text-[10px] text-slate-400">{c.id}</div>
           </div>
-          <h1 className="text-4xl sm:text-5xl font-extrabold tracking-tight text-white leading-tight">
-            Autonomous AI Dispute &amp; Refund Autopilot for PayPal
-          </h1>
-          <p className="text-base sm:text-lg text-slate-400 leading-relaxed">
-            Protect merchant revenue, eliminate chargeback fees, and settle inquiries autonomously using mathematical Expected Value ($EV$), SHA-256 Zero-Hallucination evidence verification, and deterministic MCP Policy Firewalls.
-          </p>
-        </div>
+        ))}
+      </section>
 
-        {/* Action Gateways Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-5xl mx-auto">
-          {/* Dispute Workbench Card */}
-          <Link
-            href="/disputes"
-            className="group p-6 rounded-2xl bg-slate-900/70 border border-slate-800 hover:border-blue-500/50 hover:bg-slate-900 transition-all shadow-xl flex flex-col justify-between"
-          >
-            <div className="space-y-4">
-              <div className="h-12 w-12 rounded-xl bg-blue-500/10 text-blue-400 border border-blue-500/20 flex items-center justify-center group-hover:scale-105 transition-transform">
-                <FileCheck className="h-6 w-6" />
-              </div>
-              <h3 className="font-bold text-lg text-white group-hover:text-blue-400 transition-colors">
-                Dispute Autopilot Workbench
-              </h3>
-              <p className="text-xs text-slate-400 leading-relaxed">
-                Filter and inspect the active dispute pipeline with real-time SLA countdown badges, carrier tracking timelines, and delivery signatures.
-              </p>
-            </div>
-            <div className="mt-6 flex items-center gap-2 text-xs font-semibold text-blue-400 group-hover:translate-x-1 transition-transform">
-              Launch Workbench <ArrowRight className="h-4 w-4" />
-            </div>
-          </Link>
+      <div className="mt-8 grid gap-6 lg:grid-cols-3">
+        <section className="rounded-xl border border-slate-800 bg-slate-900 p-6 shadow-sm lg:col-span-2">
+          <h2 className="text-lg font-semibold">Outcomes by reason code</h2>
+          <div className="mt-2 flex flex-wrap gap-4 text-xs text-slate-300">
+            <Legend className="bg-emerald-500" label="Won" />
+            <Legend className="bg-sky-500" label="Settled" />
+            <Legend className="bg-rose-500" label="Lost / expired" />
+            <Legend className="bg-slate-600" label="In progress" />
+          </div>
+          <ul className="mt-4 space-y-4">
+            {reasons.map((r) => {
+              const pct = (n: number) => `${(n / r.total) * 100}%`;
+              const other = r.total - r.won - r.settled - r.lost - r.open;
+              return (
+                <li key={r.reason_code}>
+                  <div className="flex justify-between text-sm">
+                    <span className="font-medium">{REASON_LABELS[r.reason_code] ?? r.reason_code}</span>
+                    <span className="tabular-nums text-slate-400">
+                      {r.total} disputes · {usd(r.amount_cents / 100)}
+                    </span>
+                  </div>
+                  <div className="mt-1 flex h-3 overflow-hidden rounded-full bg-slate-800" role="img"
+                    aria-label={`${r.won} won, ${r.settled} settled, ${r.lost + other} lost or expired, ${r.open} in progress`}>
+                    <div className="bg-emerald-500" style={{ width: pct(r.won) }} />
+                    <div className="bg-sky-500" style={{ width: pct(r.settled) }} />
+                    <div className="bg-rose-500" style={{ width: pct(r.lost + other) }} />
+                    <div className="bg-slate-600" style={{ width: pct(r.open) }} />
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        </section>
 
-          {/* Evidence Verifier Card */}
-          <Link
-            href="/disputes/DSP-GOLD-004"
-            className="group p-6 rounded-2xl bg-slate-900/70 border border-amber-500/20 hover:border-amber-500/50 hover:bg-slate-900 transition-all shadow-xl flex flex-col justify-between"
-          >
-            <div className="space-y-4">
-              <div className="h-12 w-12 rounded-xl bg-amber-500/10 text-amber-400 border border-amber-500/30 flex items-center justify-center group-hover:scale-105 transition-transform">
-                <AlertTriangle className="h-6 w-6" />
-              </div>
-              <h3 className="font-bold text-lg text-white group-hover:text-amber-400 transition-colors">
-                High-Value Approval Gate
-              </h3>
-              <p className="text-xs text-slate-400 leading-relaxed">
-                Demonstrates BR-006: 1-click analyst approval workflow for high-value disputes (&gt; $250.00) with SHA-256 zero-hallucination fact verification.
-              </p>
-            </div>
-            <div className="mt-6 flex items-center gap-2 text-xs font-semibold text-amber-400 group-hover:translate-x-1 transition-transform">
-              Test DSP-GOLD-004 ($450) <ArrowRight className="h-4 w-4" />
-            </div>
-          </Link>
+        <section className="rounded-xl border border-slate-800 bg-slate-900 p-6 shadow-sm">
+          <h2 className="text-lg font-semibold">Anomaly watch</h2>
+          <ul className="mt-4 divide-y divide-slate-800">
+            {alerts.map((a) => (
+              <li key={a.label} className="flex items-center justify-between py-2 text-sm">
+                <span className="flex items-center gap-2">
+                  <span className={`h-2 w-2 rounded-full ${a.value === 0 ? 'bg-slate-600' : TONE[a.tone]}`} />
+                  {a.label}
+                </span>
+                <span className={`tabular-nums font-semibold ${a.value === 0 ? 'text-slate-400' : 'text-white'}`}>{a.value}</span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      </div>
 
-          {/* Buyer Negotiation Portal Card */}
-          <Link
-            href="/negotiate/DSP-GOLD-003"
-            className="group p-6 rounded-2xl bg-slate-900/70 border border-purple-500/20 hover:border-purple-500/50 hover:bg-slate-900 transition-all shadow-xl flex flex-col justify-between"
-          >
-            <div className="space-y-4">
-              <div className="h-12 w-12 rounded-xl bg-purple-500/10 text-purple-400 border border-purple-500/30 flex items-center justify-center group-hover:scale-105 transition-transform">
-                <MessageSquare className="h-6 w-6" />
-              </div>
-              <h3 className="font-bold text-lg text-white group-hover:text-purple-400 transition-colors">
-                Buyer Negotiation Portal
-              </h3>
-              <p className="text-xs text-slate-400 leading-relaxed">
-                Experience real-time settlement negotiation with MCP Policy Firewall interception badges and 40% refund cap clamping (BR-004 / BR-020).
-              </p>
-            </div>
-            <div className="mt-6 flex items-center gap-2 text-xs font-semibold text-purple-400 group-hover:translate-x-1 transition-transform">
-              Open Buyer Chat (DSP-GOLD-003) <ArrowRight className="h-4 w-4" />
-            </div>
-          </Link>
-        </div>
-      </main>
-    </div>
+      <WhatIfSimulator
+        rows={replayRows}
+        baseline={{
+          maxAutoDisputeCents: policy.max_auto_dispute_cents,
+          maxRefundPct: normalizeRefundPercentage(policy.max_refund_offer_pct),
+          minWinProb: policy.min_win_prob_auto_submit,
+        }}
+      />
+    </main>
+  );
+}
+
+const TONE = { red: 'bg-rose-500', amber: 'bg-amber-500', blue: 'bg-paypal-lightBlue' } as const;
+
+function Legend({ className, label }: { className: string; label: string }) {
+  return (
+    <span className="flex items-center gap-1.5">
+      <span className={`h-2.5 w-2.5 rounded-sm ${className}`} />
+      {label}
+    </span>
   );
 }
