@@ -175,7 +175,7 @@ Executes a tool through the policy firewall.
 |---|---|---|
 | `make-offer` | `dispute_id`, `offer_amount_cents`, `rationale?` | `403` if amount > $250 (moves to `READY_FOR_REVIEW`); clamped to the refund cap (`BR-004`) and remaining order balance (`BR-014`); `409` if the dispute has no active negotiation session |
 | `provide-evidence` | `dispute_id`, `evidence_type?`, `tracking_number?`, `carrier?`, `notes?` | `403` + human review above $250 (`BR-006`); otherwise moves dispute to `SUBMITTED` |
-| `accept-claim` | `dispute_id`, `reason?` | `403` + human review above the $35 auto-accept ceiling (`BR-017`); otherwise moves dispute to `SETTLED_VIA_REFUND` |
+| `accept-claim` | `dispute_id`, `reason?` | `403` + human review above $250 (`BR-006`; set to the $35 `BR-017` ceiling for production); otherwise moves dispute to `SETTLED_VIA_REFUND` |
 
 All tools return `409` for disputes already in a terminal state, checked before any PayPal call (`BR-005`). Every tool call, approval and interception is written to the append-only `audit_logs` table.
 

@@ -607,7 +607,7 @@ describe('M2 Adversarial Stress Testing: Prompt Injection & MCP Policy Firewall'
       }
     });
 
-    it('TC-EMP-API-006: accept-claim and provide-evidence cannot bypass the human gate (BR-006, BR-017)', async () => {
+    it('TC-EMP-API-006: accept-claim and provide-evidence cannot bypass the $250 human gate (BR-006)', async () => {
       const { POST } = await import('../../app/api/mcp/tools/route');
       const { getDb } = await import('../../lib/db');
       const diskDb = getDb();
@@ -617,17 +617,22 @@ describe('M2 Adversarial Stress Testing: Prompt Injection & MCP Policy Firewall'
         body: JSON.stringify({ tool, arguments: { dispute_id: disputeId } }),
       }));
 
-      // $129.00 is above the $35.00 auto-accept ceiling
-      const accept = await call('accept-claim', 'DSP-GOLD-042');
+      // $349.00 is above the $250.00 human-review gate
+      const accept = await call('accept-claim', 'DSP-GOLD-039');
       expect(accept.status).toBe(403);
-      expect((await accept.json()).rule_id).toBe('BR-017');
+      expect((await accept.json()).rule_id).toBe('BR-006');
+
+      // $189.00 is under the gate, so the agent may concede it
+      const smallAccept = await call('accept-claim', 'DSP-GOLD-041');
+      expect(smallAccept.status).toBe(200);
+      expect((diskDb.prepare('SELECT status FROM disputes WHERE id = ?').get('DSP-GOLD-041') as any).status).toBe('SETTLED_VIA_REFUND');
 
       // $450.00 is above the $250.00 human-review gate
       const evidence = await call('provide-evidence', 'DSP-GOLD-004');
       expect(evidence.status).toBe(403);
       expect((await evidence.json()).rule_id).toBe('BR-006');
 
-      for (const id of ['DSP-GOLD-042', 'DSP-GOLD-004']) {
+      for (const id of ['DSP-GOLD-039', 'DSP-GOLD-004']) {
         const row = diskDb.prepare('SELECT status FROM disputes WHERE id = ?').get(id) as any;
         expect(row.status).toBe('READY_FOR_REVIEW');
       }

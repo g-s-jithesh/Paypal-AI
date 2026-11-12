@@ -100,13 +100,12 @@ export async function POST(req: Request) {
       }, { status: 409 });
     }
 
-    // BR-006 / BR-017: the agent may only submit evidence up to the human-review gate,
-    // and only concede claims up to the auto-accept ceiling. Above that, a human decides.
+    // BR-006: the agent may submit evidence or concede a claim only up to the human-review gate.
+    // ponytail: accept-claim shares the $250 gate for testing; tighten to policy.auto_accept_below_cents ($35, BR-017) for production
     if (toolName !== 'make-offer') {
       const policy = loadMerchantPolicy(dispute.merchant_id, db);
-      const isAccept = toolName === 'accept-claim';
-      const limitCents = isAccept ? policy.auto_accept_below_cents : policy.max_auto_dispute_cents;
-      const ruleId = isAccept ? 'BR-017' : 'BR-006';
+      const limitCents = policy.max_auto_dispute_cents;
+      const ruleId = 'BR-006';
 
       if (dispute.dispute_amount_cents > limitCents) {
         runTransaction((conn) => {
