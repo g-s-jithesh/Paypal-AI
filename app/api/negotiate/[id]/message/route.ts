@@ -207,7 +207,7 @@ export async function POST(
     const buyerMsg = {
       id: `msg_${Date.now()}_buyer`,
       sender: 'BUYER',
-      text: sanitization.sanitizedPrompt,
+      text: sanitization.cleanedInput, // PII-redacted; the <buyer_input> wrapper is only for LLM prompts
       timestamp: new Date().toISOString(),
     };
 
